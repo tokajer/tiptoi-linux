@@ -211,6 +211,12 @@ trim_appdir() {
     while IFS= read -r -d '' f; do
         safe_rm_rf "$f"
     done < <(find "$pyside_dir" -maxdepth 1 -name "QtOpenGL*.abi3.so*" -print0 2>/dev/null)
+    # WHY: these two platform plugins link libQt6OpenGL / libQt6EglFSDeviceIntegration, both trimmed
+    # above; the app only uses xcb (offscreen/minimal for tests). A build host with a system Qt6
+    # (e.g. Fedora) hides this - ldd resolves the missing libs from /usr/lib64 - but CI has none.
+    while IFS= read -r -d '' f; do
+        safe_rm_rf "$f"
+    done < <(find "${qt_dir}/plugins/platforms" -maxdepth 1 \( -name "libqeglfs.so" -o -name "libqminimalegl.so" \) -print0 2>/dev/null)
 
     local dev_exe
     for dev_exe in qmlls qmlformat qmllint assistant linguist lupdate lrelease designer svgtoqml; do

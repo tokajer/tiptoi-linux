@@ -109,11 +109,12 @@ bash packaging/smoke-test.sh
 
 ### Releasing
 
-1. Update `__version__` in `tiptoi_linux/__init__.py` (`pyproject.toml` reads it from there).
-2. On GitHub, go to **Actions → Release → Run workflow**.
+Publish a release on GitHub with a tag like `v0.2.0` - that tag is the version; nothing in the
+repository needs bumping. Alternatively, go to **Actions → Release → Run workflow** and enter the
+tag; the workflow creates the release if it doesn't exist yet.
 
-The workflow runs the tests, builds and smoke-tests the AppImage, and publishes a GitHub
-release with the AppImage and a `SHA256SUMS` file.
+The workflow runs the tests, stamps the tag's version into the package, builds and smoke-tests
+the AppImage, and attaches it to the release together with a `SHA256SUMS` file.
 
 ## License
 

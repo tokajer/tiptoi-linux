@@ -1,8 +1,9 @@
 # Builds the AppImage and attaches it to a GitHub release. Two ways to start it:
 #   - Publish a release in the GitHub UI (tag vX.Y.Z): the AppImage is attached to that release.
-#   - Actions tab -> "Release" -> "Run workflow": attaches to release v<version> if it already
-#     exists, otherwise creates it with generated notes.
-# The version comes from tiptoi_linux/__init__.py (pyproject.toml reads it from there); bump it there first.
+#   - Actions tab -> "Release" -> "Run workflow" with a tag: attaches to that release if it
+#     already exists, otherwise creates it with generated notes.
+# The version is the release tag without its "v"; it is stamped into tiptoi_linux/__init__.py
+# at build time, so the repository never needs a version bump.
 name: Release
 
 on:
@@ -10,6 +11,10 @@ on:
     types: [published]
   workflow_dispatch:
     inputs:
+      tag:
+        description: "Release tag, e.g. v0.2.0"
+        type: string
+        required: true
       prerelease:
         description: "Mark the release as a pre-release (only when this run creates it)"
         type: boolean
@@ -39,14 +44,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           EVENT: ${{ github.event_name }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
-          version="$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' tiptoi_linux/__init__.py)"
-          tag="v${version}"
+          if [ "$EVENT" = "release" ]; then tag="$RELEASE_TAG"; else tag="$INPUT_TAG"; fi
+          # WHY: the tag becomes the package version, so it must be a valid PEP 440 release
+          # (e.g. v0.2.0, v1.0.0rc1) - anything else would fail later inside the wheel build
+          if ! [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+((a|b|rc)[0-9]+)?$ ]]; then
+            echo "::error::release tag '$tag' is not of the form vX.Y.Z (optionally followed by a1, b1 or rc1)"
+            exit 1
+          fi
+          version="${tag#v}"
           if [ "$EVENT" = "release" ]; then
-            if [ "$RELEASE_TAG" != "$tag" ]; then
-              echo "::error::release tag $RELEASE_TAG does not match tiptoi_linux/__init__.py version $version (expected $tag)"
-              exit 1
-            fi
             exists=true
             ref="$GITHUB_SHA"
           elif gh release view "$tag" >/dev/null 2>&1; then
@@ -78,7 +86,7 @@ jobs:
         with:
           python-version: "3.11"
 
-      # libQt6Gui needs these at import time even with the offscreen platform (see PLANS.md).
+      # libQt6Gui needs these at import time, even with the offscreen platform.
       - name: Install Qt runtime libraries and gettext
         run: |
           sudo apt-get update -qq
@@ -122,15 +130,12 @@ jobs:
         with:
           ref: ${{ needs.resolve.outputs.ref }}
 
-      - name: Check the version at the build commit
+      - name: Stamp the release version
         env:
           VERSION: ${{ needs.resolve.outputs.version }}
         run: |
-          version="$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' tiptoi_linux/__init__.py)"
-          if [ "$version" != "$VERSION" ]; then
-            echo "::error::the release tag's tiptoi_linux/__init__.py says $version, expected $VERSION"
-            exit 1
-          fi
+          sed -i "s/^__version__ = .*/__version__ = \"${VERSION}\"/" tiptoi_linux/__init__.py
+          grep -qx "__version__ = \"${VERSION}\"" tiptoi_linux/__init__.py
 
       # The build script rasterises the SVG icon with magick, convert or inkscape, and its
       # post-trim check imports PySide6.QtWidgets, which needs the same Qt runtime libraries as

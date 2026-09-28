@@ -11,7 +11,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from tiptoi_linux import common, pen
+from tiptoi_linux import pen, streams
+from tiptoi_linux.pen import detect as pen_detect
+from tiptoi_linux.pen import install as pen_install
 from tiptoi_linux.catalog import Catalog, Product, parse_catalog
 from tiptoi_linux.pen import Pen, PenError, PenSummary
 
@@ -98,7 +100,7 @@ class FindPenDetectionTests(unittest.TestCase):
                 {"target": "/media/tiptoi", "source": "/dev/sdb1", "fstype": "vfat", "label": "TIPTOI"},
             ]
         }
-        with patch.object(pen.subprocess, "run", return_value=_completed_process(payload)):
+        with patch.object(subprocess, "run", return_value=_completed_process(payload)):
             result = pen.find_pen()
         self.assertEqual(result.mountpoint, Path("/media/tiptoi"))
         self.assertEqual(result.source, "/dev/sdb1")
@@ -110,13 +112,13 @@ class FindPenDetectionTests(unittest.TestCase):
                 {"target": "/media/tiptoi", "source": "/dev/sdb1", "fstype": "vfat", "label": "tiptoi"},
             ]
         }
-        with patch.object(pen.subprocess, "run", return_value=_completed_process(payload)):
+        with patch.object(subprocess, "run", return_value=_completed_process(payload)):
             result = pen.find_pen()
         self.assertEqual(result.mountpoint, Path("/media/tiptoi"))
 
     def test_zero_matches_raises(self) -> None:
         payload = {"filesystems": [{"target": "/", "source": "/dev/sda1", "fstype": "ext4", "label": None}]}
-        with patch.object(pen.subprocess, "run", return_value=_completed_process(payload)):
+        with patch.object(subprocess, "run", return_value=_completed_process(payload)):
             with self.assertRaises(PenError):
                 pen.find_pen()
 
@@ -127,23 +129,23 @@ class FindPenDetectionTests(unittest.TestCase):
                 {"target": "/media/b", "source": "/dev/sdc1", "fstype": "vfat", "label": "tiptoi"},
             ]
         }
-        with patch.object(pen.subprocess, "run", return_value=_completed_process(payload)):
+        with patch.object(subprocess, "run", return_value=_completed_process(payload)):
             with self.assertRaises(PenError):
                 pen.find_pen()
 
     def test_missing_findmnt_binary_raises(self) -> None:
-        with patch.object(pen.subprocess, "run", side_effect=FileNotFoundError()):
+        with patch.object(subprocess, "run", side_effect=FileNotFoundError()):
             with self.assertRaises(PenError):
                 pen.find_pen()
 
     def test_nonzero_returncode_raises(self) -> None:
-        with patch.object(pen.subprocess, "run", return_value=_completed_process({}, returncode=1, stderr="boom")):
+        with patch.object(subprocess, "run", return_value=_completed_process({}, returncode=1, stderr="boom")):
             with self.assertRaises(PenError):
                 pen.find_pen()
 
     def test_unparseable_json_raises(self) -> None:
         bad_result = subprocess.CompletedProcess(args=["findmnt"], returncode=0, stdout="not json{{{", stderr="")
-        with patch.object(pen.subprocess, "run", return_value=bad_result):
+        with patch.object(subprocess, "run", return_value=bad_result):
             with self.assertRaises(PenError):
                 pen.find_pen()
 
@@ -153,13 +155,13 @@ class FindPenDetectionTests(unittest.TestCase):
                 {"source": "/dev/sdb1", "fstype": "vfat", "label": "tiptoi"},  # no "target"
             ]
         }
-        with patch.object(pen.subprocess, "run", return_value=_completed_process(payload)):
+        with patch.object(subprocess, "run", return_value=_completed_process(payload)):
             with self.assertRaises(PenError):
                 pen.find_pen()
 
     def test_dict_valued_filesystems_is_treated_as_empty(self) -> None:
         payload = {"filesystems": {"target": "/media/tiptoi", "source": "/dev/sdb1", "fstype": "vfat", "label": "tiptoi"}}
-        with patch.object(pen.subprocess, "run", return_value=_completed_process(payload)):
+        with patch.object(subprocess, "run", return_value=_completed_process(payload)):
             with self.assertRaises(PenError):
                 pen.find_pen()
 
@@ -170,7 +172,7 @@ class FindPenDetectionTests(unittest.TestCase):
                 {"target": "/mnt/bind/tiptoi", "source": "/dev/sdb1", "fstype": "vfat", "label": "tiptoi"},
             ]
         }
-        with patch.object(pen.subprocess, "run", return_value=_completed_process(payload)):
+        with patch.object(subprocess, "run", return_value=_completed_process(payload)):
             result = pen.find_pen()
         self.assertEqual(result.source, "/dev/sdb1")
 
@@ -180,7 +182,7 @@ class FindPenDetectionTests(unittest.TestCase):
                 {"target": "/media/tiptoi", "source": "/dev/sdb1", "fstype": "fuseblk", "label": "tiptoi"},
             ]
         }
-        with patch.object(pen.subprocess, "run", return_value=_completed_process(payload)):
+        with patch.object(subprocess, "run", return_value=_completed_process(payload)):
             result = pen.find_pen()
         self.assertEqual(result.mountpoint, Path("/media/tiptoi"))
 
@@ -190,7 +192,7 @@ class InstallProtectedNamesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as pen_dir, tempfile.TemporaryDirectory() as src_dir:
             pen_root = Path(pen_dir)
             (pen_root / "system").mkdir()
-            fake_pen = Pen(mountpoint=pen_root, source="")
+            fake_pen = Pen(mountpoint=pen_root, source=None)
 
             source = Path(src_dir) / "title.gme"
             source.write_bytes(b"data")
@@ -200,7 +202,7 @@ class InstallProtectedNamesTests(unittest.TestCase):
             for bad_name in ("system.gme", "SONGS.gme", "Stories.GME", "../escape.gme"):
                 with self.subTest(bad_name=bad_name):
                     with self.assertRaises(PenError):
-                        pen.install_product(fake_pen, source, file_name=bad_name)
+                        pen.install_file(fake_pen, source, file_name=bad_name)
 
             self.assertTrue((pen_root / "system").is_dir())
 
@@ -214,20 +216,20 @@ class DetectedPenMountCheckTests(unittest.TestCase):
             source = Path(src_dir) / "title.gme"
             source.write_bytes(b"data")
 
-            with patch.object(pen.os.path, "ismount", return_value=False):
+            with patch.object(os.path, "ismount", return_value=False):
                 with self.assertRaises(PenError):
-                    pen.install_product(fake_pen, source, file_name="title.gme")
+                    pen.install_file(fake_pen, source, file_name="title.gme")
 
     def test_override_pen_skips_mount_check(self) -> None:
         with tempfile.TemporaryDirectory() as pen_dir, tempfile.TemporaryDirectory() as src_dir:
             pen_root = Path(pen_dir)
-            fake_pen = Pen(mountpoint=pen_root, source="")
+            fake_pen = Pen(mountpoint=pen_root, source=None)
 
             source = Path(src_dir) / "title.gme"
             source.write_bytes(b"data")
 
-            with patch.object(pen.os.path, "ismount", return_value=False):
-                destination = pen.install_product(fake_pen, source, file_name="title.gme")
+            with patch.object(os.path, "ismount", return_value=False):
+                destination = pen.install_file(fake_pen, source, file_name="title.gme")
 
             self.assertEqual(destination.read_bytes(), b"data")
 
@@ -236,16 +238,16 @@ class FreeSpaceTests(unittest.TestCase):
     def test_insufficient_space_raises_and_leaves_no_temp_file(self) -> None:
         with tempfile.TemporaryDirectory() as pen_dir, tempfile.TemporaryDirectory() as src_dir:
             pen_root = Path(pen_dir)
-            fake_pen = Pen(mountpoint=pen_root, source="")
+            fake_pen = Pen(mountpoint=pen_root, source=None)
 
             source = Path(src_dir) / "title.gme"
             source.write_bytes(b"x" * 1000)
 
             real_usage = shutil.disk_usage(pen_dir)
             tiny_free_usage = real_usage._replace(free=10)
-            with patch.object(pen.shutil, "disk_usage", return_value=tiny_free_usage):
+            with patch.object(shutil, "disk_usage", return_value=tiny_free_usage):
                 with self.assertRaises(PenError):
-                    pen.install_product(fake_pen, source, file_name="title.gme")
+                    pen.install_file(fake_pen, source, file_name="title.gme")
 
             self.assertEqual(list(pen_root.iterdir()), [])
 
@@ -254,10 +256,10 @@ class DiskSpaceTests(unittest.TestCase):
     def test_returns_free_and_total_from_disk_usage(self) -> None:
         with tempfile.TemporaryDirectory() as pen_dir:
             pen_root = Path(pen_dir)
-            fake_pen = Pen(mountpoint=pen_root, source="")
+            fake_pen = Pen(mountpoint=pen_root, source=None)
 
             fake_usage = shutil.disk_usage(pen_dir)._replace(free=111, total=222)
-            with patch.object(pen.shutil, "disk_usage", return_value=fake_usage) as mock_usage:
+            with patch.object(shutil, "disk_usage", return_value=fake_usage) as mock_usage:
                 result = pen.disk_space(fake_pen)
 
             mock_usage.assert_called_once_with(pen_root)
@@ -269,25 +271,25 @@ class PenStillMountedTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as pen_dir:
             fake_pen = Pen(mountpoint=Path(pen_dir), source="/dev/sdb1")
 
-            with patch.object(pen.os.path, "ismount", return_value=True) as mock_ismount:
-                self.assertTrue(pen.pen_still_mounted(fake_pen))
+            with patch.object(os.path, "ismount", return_value=True) as mock_ismount:
+                self.assertTrue(pen.pen_mount_alive(fake_pen))
             mock_ismount.assert_called_once_with(fake_pen.mountpoint)
 
-            with patch.object(pen.os.path, "ismount", return_value=False):
-                self.assertFalse(pen.pen_still_mounted(fake_pen))
+            with patch.object(os.path, "ismount", return_value=False):
+                self.assertFalse(pen.pen_mount_alive(fake_pen))
 
     def test_override_pen_checks_directory_existence_instead(self) -> None:
         with tempfile.TemporaryDirectory() as pen_dir:
             pen_root = Path(pen_dir)
-            fake_pen = Pen(mountpoint=pen_root, source="")
+            fake_pen = Pen(mountpoint=pen_root, source=None)
 
-            with patch.object(pen.os.path, "ismount", return_value=False):
+            with patch.object(os.path, "ismount", return_value=False):
                 # WHY: an override pen has no "source" device to check via ismount() - proves the
                 # override path never consults it, only pen.mountpoint.is_dir()
-                self.assertTrue(pen.pen_still_mounted(fake_pen))
+                self.assertTrue(pen.pen_mount_alive(fake_pen))
 
-            missing_pen = Pen(mountpoint=pen_root / "does-not-exist", source="")
-            self.assertFalse(pen.pen_still_mounted(missing_pen))
+            missing_pen = Pen(mountpoint=pen_root / "does-not-exist", source=None)
+            self.assertFalse(pen.pen_mount_alive(missing_pen))
 
 
 class PenDevicePresentTests(unittest.TestCase):
@@ -295,27 +297,27 @@ class PenDevicePresentTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             fake_path = Path(tmp_dir) / "tiptoi"
             fake_path.touch()
-            with patch.object(pen, "PEN_BY_LABEL_PATH", fake_path):
-                self.assertTrue(pen.pen_device_present())
+            with patch.object(pen_detect, "PEN_BY_LABEL_PATH", fake_path):
+                self.assertTrue(pen.device_plugged_in())
 
     def test_false_when_by_label_symlink_absent(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             fake_path = Path(tmp_dir) / "tiptoi"
-            with patch.object(pen, "PEN_BY_LABEL_PATH", fake_path):
-                self.assertFalse(pen.pen_device_present())
+            with patch.object(pen_detect, "PEN_BY_LABEL_PATH", fake_path):
+                self.assertFalse(pen.device_plugged_in())
 
 
 class DryRunTests(unittest.TestCase):
     def test_dry_run_writes_nothing(self) -> None:
         with tempfile.TemporaryDirectory() as pen_dir, tempfile.TemporaryDirectory() as src_dir:
             pen_root = Path(pen_dir)
-            fake_pen = Pen(mountpoint=pen_root, source="")
+            fake_pen = Pen(mountpoint=pen_root, source=None)
 
             source = Path(src_dir) / "title.gme"
             source.write_bytes(b"data")
 
             before = sorted(pen_root.iterdir())
-            destination = pen.install_product(
+            destination = pen.install_file(
                 fake_pen, source, file_name="title.gme", dry_run=True
             )
             after = sorted(pen_root.iterdir())
@@ -329,12 +331,12 @@ class InstallSucceedsTests(unittest.TestCase):
     def test_install_copies_file_and_leaves_only_the_title_on_the_pen(self) -> None:
         with tempfile.TemporaryDirectory() as pen_dir, tempfile.TemporaryDirectory() as src_dir:
             pen_root = Path(pen_dir)
-            fake_pen = Pen(mountpoint=pen_root, source="")
+            fake_pen = Pen(mountpoint=pen_root, source=None)
 
             source = Path(src_dir) / "title.gme"
             source.write_bytes(b"payload-bytes")
 
-            destination = pen.install_product(fake_pen, source, file_name="title.gme")
+            destination = pen.install_file(fake_pen, source, file_name="title.gme")
 
             self.assertEqual(destination, pen_root / "title.gme")
             self.assertEqual(destination.read_bytes(), b"payload-bytes")
@@ -343,7 +345,7 @@ class InstallSucceedsTests(unittest.TestCase):
     def test_directory_fsync_einval_is_tolerated_and_title_is_installed(self) -> None:
         with tempfile.TemporaryDirectory() as pen_dir, tempfile.TemporaryDirectory() as src_dir:
             pen_root = Path(pen_dir)
-            fake_pen = Pen(mountpoint=pen_root, source="")
+            fake_pen = Pen(mountpoint=pen_root, source=None)
 
             source = Path(src_dir) / "title.gme"
             source.write_bytes(b"payload-bytes")
@@ -352,20 +354,20 @@ class InstallSucceedsTests(unittest.TestCase):
 
             def flaky_fsync(fd: int) -> None:
                 # WHY: distinguish the directory fd from regular file fds by st_mode, not call
-                # order, so this is robust regardless of how install_product sequences its fsyncs
+                # order, so this is robust regardless of how install_file sequences its fsyncs
                 if stat.S_ISDIR(os.fstat(fd).st_mode):
                     raise OSError(errno.EINVAL, "fsync not supported on directory")
                 real_fsync(fd)
 
-            with patch.object(pen.os, "fsync", side_effect=flaky_fsync):
-                destination = pen.install_product(fake_pen, source, file_name="title.gme")
+            with patch.object(os, "fsync", side_effect=flaky_fsync):
+                destination = pen.install_file(fake_pen, source, file_name="title.gme")
 
             self.assertEqual(destination.read_bytes(), b"payload-bytes")
 
     def test_directory_fsync_other_error_raises_pen_error(self) -> None:
         with tempfile.TemporaryDirectory() as pen_dir, tempfile.TemporaryDirectory() as src_dir:
             pen_root = Path(pen_dir)
-            fake_pen = Pen(mountpoint=pen_root, source="")
+            fake_pen = Pen(mountpoint=pen_root, source=None)
 
             source = Path(src_dir) / "title.gme"
             source.write_bytes(b"payload-bytes")
@@ -377,9 +379,9 @@ class InstallSucceedsTests(unittest.TestCase):
                     raise OSError(errno.EACCES, "permission denied")
                 real_fsync(fd)
 
-            with patch.object(pen.os, "fsync", side_effect=flaky_fsync):
+            with patch.object(os, "fsync", side_effect=flaky_fsync):
                 with self.assertRaises(PenError):
-                    pen.install_product(fake_pen, source, file_name="title.gme")
+                    pen.install_file(fake_pen, source, file_name="title.gme")
 
 
 class ReadGmeVersionTests(unittest.TestCase):
@@ -416,7 +418,7 @@ class OutdatedTitlesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as pen_dir:
             pen_root = Path(pen_dir)
             (pen_root / "Die Eiskoenigin.gme").write_bytes(_synthetic_gme("20150101"))
-            fake_pen = Pen(mountpoint=pen_root, source="")
+            fake_pen = Pen(mountpoint=pen_root, source=None)
 
             result = pen.outdated_titles(fake_pen, self.catalog)
             self.assertEqual(result, [])
@@ -425,7 +427,7 @@ class OutdatedTitlesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as pen_dir:
             pen_root = Path(pen_dir)
             (pen_root / "Die Eiskoenigin.gme").write_bytes(_synthetic_gme("20111024"))
-            fake_pen = Pen(mountpoint=pen_root, source="")
+            fake_pen = Pen(mountpoint=pen_root, source=None)
 
             result = pen.outdated_titles(fake_pen, self.catalog)
             self.assertEqual(len(result), 1)
@@ -437,7 +439,7 @@ class OutdatedTitlesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as pen_dir:
             pen_root = Path(pen_dir)
             (pen_root / "Die Eiskoenigin.gme").write_bytes(_synthetic_gme(""))
-            fake_pen = Pen(mountpoint=pen_root, source="")
+            fake_pen = Pen(mountpoint=pen_root, source=None)
 
             result = pen.outdated_titles(fake_pen, self.catalog)
             self.assertEqual(len(result), 1)
@@ -448,7 +450,7 @@ class OutdatedTitlesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as pen_dir:
             pen_root = Path(pen_dir)
             (pen_root / "UnknownTitle.gme").write_bytes(_synthetic_gme("20260115"))
-            fake_pen = Pen(mountpoint=pen_root, source="")
+            fake_pen = Pen(mountpoint=pen_root, source=None)
 
             result = pen.outdated_titles(fake_pen, self.catalog)
             self.assertEqual(result, [])
@@ -457,13 +459,11 @@ class OutdatedTitlesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as pen_dir:
             pen_root = Path(pen_dir)
             (pen_root / "CASE.GME").write_bytes(_synthetic_gme("20200101"))
-            fake_pen = Pen(mountpoint=pen_root, source="")
+            fake_pen = Pen(mountpoint=pen_root, source=None)
 
             catalog = Catalog(
-                csv_version="",
-                firmware=None,
                 products=(
-                    Product(series_id="1", version="20200101", url="https://cdn.example.com/CASE.gme", name="CASE"),
+                    Product(version="20200101", url="https://cdn.example.com/CASE.gme", name="CASE"),
                 ),
             )
 
@@ -475,15 +475,13 @@ class OutdatedTitlesTests(unittest.TestCase):
             pen_root = Path(pen_dir)
             for name in ("zeta.gme", "Alpha.gme", "beta.gme"):
                 (pen_root / name).write_bytes(_synthetic_gme("20111024"))
-            fake_pen = Pen(mountpoint=pen_root, source="")
+            fake_pen = Pen(mountpoint=pen_root, source=None)
 
             catalog = Catalog(
-                csv_version="",
-                firmware=None,
                 products=(
-                    Product(series_id="1", version="9", url="https://cdn.example.com/zeta.gme", name="zeta"),
-                    Product(series_id="2", version="9", url="https://cdn.example.com/Alpha.gme", name="Alpha"),
-                    Product(series_id="3", version="9", url="https://cdn.example.com/beta.gme", name="beta"),
+                    Product(version="9", url="https://cdn.example.com/zeta.gme", name="zeta"),
+                    Product(version="9", url="https://cdn.example.com/Alpha.gme", name="Alpha"),
+                    Product(version="9", url="https://cdn.example.com/beta.gme", name="beta"),
                 ),
             )
 
@@ -509,7 +507,7 @@ class PenSummaryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as pen_dir:
             pen_root = Path(pen_dir)
             (pen_root / "Die Eiskoenigin.gme").write_bytes(_synthetic_gme("20111024"))
-            fake_pen = Pen(mountpoint=pen_root, source="")
+            fake_pen = Pen(mountpoint=pen_root, source=None)
 
             summary = pen.pen_summary(fake_pen, self.catalog)
 
@@ -525,7 +523,7 @@ class PenSummaryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as pen_dir:
             pen_root = Path(pen_dir)
             (pen_root / "Die Eiskoenigin.gme").write_bytes(_synthetic_gme("20111024"))
-            fake_pen = Pen(mountpoint=pen_root, source="")
+            fake_pen = Pen(mountpoint=pen_root, source=None)
 
             summary = pen.pen_summary(fake_pen, None)
 
@@ -536,7 +534,6 @@ class PenSummaryTests(unittest.TestCase):
 class InstallTitleTests(unittest.TestCase):
     def setUp(self) -> None:
         self.product = Product(
-            series_id="150",
             version="20190529",
             url="https://cdn.ravensburger.de/db/applications/CREATE_Kreative_Bildergeschichten.gme",
             name="CREATE_Kreative_Bildergeschichten",
@@ -545,12 +542,12 @@ class InstallTitleTests(unittest.TestCase):
     def test_downloads_and_installs_under_gme_file_name(self) -> None:
         with tempfile.TemporaryDirectory() as pen_dir, tempfile.TemporaryDirectory() as src_dir:
             pen_root = Path(pen_dir)
-            fake_pen = Pen(mountpoint=pen_root, source="")
+            fake_pen = Pen(mountpoint=pen_root, source=None)
 
             downloaded = Path(src_dir) / "downloaded.gme"
             downloaded.write_bytes(b"payload-bytes")
 
-            with patch.object(pen, "download_product", return_value=downloaded) as mock_download:
+            with patch.object(pen_install, "download_product", return_value=downloaded) as mock_download:
                 destination = pen.install_title(fake_pen, self.product)
 
             mock_download.assert_called_once()
@@ -561,12 +558,12 @@ class InstallTitleTests(unittest.TestCase):
     def test_dry_run_writes_nothing_to_the_pen(self) -> None:
         with tempfile.TemporaryDirectory() as pen_dir, tempfile.TemporaryDirectory() as src_dir:
             pen_root = Path(pen_dir)
-            fake_pen = Pen(mountpoint=pen_root, source="")
+            fake_pen = Pen(mountpoint=pen_root, source=None)
 
             downloaded = Path(src_dir) / "downloaded.gme"
             downloaded.write_bytes(b"payload-bytes")
 
-            with patch.object(pen, "download_product", return_value=downloaded):
+            with patch.object(pen_install, "download_product", return_value=downloaded):
                 destination = pen.install_title(fake_pen, self.product, dry_run=True)
 
             self.assertEqual(list(pen_root.iterdir()), [])
@@ -575,7 +572,7 @@ class InstallTitleTests(unittest.TestCase):
     def test_install_title_maps_download_progress_to_phase_download(self) -> None:
         with tempfile.TemporaryDirectory() as pen_dir, tempfile.TemporaryDirectory() as src_dir:
             pen_root = Path(pen_dir)
-            fake_pen = Pen(mountpoint=pen_root, source="")
+            fake_pen = Pen(mountpoint=pen_root, source=None)
 
             downloaded = Path(src_dir) / "downloaded.gme"
             downloaded.write_bytes(b"data")
@@ -590,18 +587,18 @@ class InstallTitleTests(unittest.TestCase):
                     progress(1, 2)
                 return downloaded
 
-            with patch.object(pen, "download_product", side_effect=fake_download):
+            with patch.object(pen_install, "download_product", side_effect=fake_download):
                 pen.install_title(fake_pen, self.product, progress=record_progress)
 
-            download_calls = [call for call in calls if call[0] == pen.PHASE_DOWNLOAD]
-            self.assertEqual(download_calls, [(pen.PHASE_DOWNLOAD, 1, 2)])
+            download_calls = [call for call in calls if call[0] == pen.Phase.DOWNLOAD]
+            self.assertEqual(download_calls, [(pen.Phase.DOWNLOAD, 1, 2)])
 
 
 class ByteVerificationTests(unittest.TestCase):
     def test_short_write_raises_and_leaves_old_title_untouched(self) -> None:
         with tempfile.TemporaryDirectory() as pen_dir, tempfile.TemporaryDirectory() as src_dir:
             pen_root = Path(pen_dir)
-            fake_pen = Pen(mountpoint=pen_root, source="")
+            fake_pen = Pen(mountpoint=pen_root, source=None)
 
             (pen_root / "title.gme").write_bytes(b"old-title-bytes")
 
@@ -619,9 +616,9 @@ class ByteVerificationTests(unittest.TestCase):
                 # the pen without needing to intercept the underlying OS write call itself
                 return _FakeStat(real_fstat(fd).st_size - 1)
 
-            with patch.object(pen.os, "fstat", side_effect=lying_fstat):
+            with patch.object(os, "fstat", side_effect=lying_fstat):
                 with self.assertRaises(PenError):
-                    pen.install_product(fake_pen, source, file_name="title.gme")
+                    pen.install_file(fake_pen, source, file_name="title.gme")
 
             self.assertEqual([p.name for p in pen_root.iterdir()], ["title.gme"])
             self.assertEqual((pen_root / "title.gme").read_bytes(), b"old-title-bytes")
@@ -631,7 +628,7 @@ class DestinationFsyncTests(unittest.TestCase):
     def test_fsyncs_destination_by_its_new_path_after_replace(self) -> None:
         with tempfile.TemporaryDirectory() as pen_dir, tempfile.TemporaryDirectory() as src_dir:
             pen_root = Path(pen_dir)
-            fake_pen = Pen(mountpoint=pen_root, source="")
+            fake_pen = Pen(mountpoint=pen_root, source=None)
 
             source = Path(src_dir) / "title.gme"
             source.write_bytes(b"payload-bytes")
@@ -646,8 +643,8 @@ class DestinationFsyncTests(unittest.TestCase):
                     pass
                 real_fsync(fd)
 
-            with patch.object(pen.os, "fsync", side_effect=recording_fsync):
-                pen.install_product(fake_pen, source, file_name="title.gme")
+            with patch.object(os, "fsync", side_effect=recording_fsync):
+                pen.install_file(fake_pen, source, file_name="title.gme")
 
             tmp_index = next(i for i, p in enumerate(synced_paths) if ".tiptoi-" in p)
             resolved_destination = str((pen_root / "title.gme").resolve())
@@ -659,26 +656,26 @@ class ReadBackVerificationTests(unittest.TestCase):
     def test_successful_install_reads_back_matching_content(self) -> None:
         with tempfile.TemporaryDirectory() as pen_dir, tempfile.TemporaryDirectory() as src_dir:
             pen_root = Path(pen_dir)
-            fake_pen = Pen(mountpoint=pen_root, source="")
+            fake_pen = Pen(mountpoint=pen_root, source=None)
 
             source = Path(src_dir) / "title.gme"
             source.write_bytes(b"payload-bytes")
 
-            destination = pen.install_product(fake_pen, source, file_name="title.gme")
+            destination = pen.install_file(fake_pen, source, file_name="title.gme")
 
             self.assertEqual(destination.read_bytes(), source.read_bytes())
 
     def test_mismatched_read_back_raises_and_does_not_delete_destination(self) -> None:
         with tempfile.TemporaryDirectory() as pen_dir, tempfile.TemporaryDirectory() as src_dir:
             pen_root = Path(pen_dir)
-            fake_pen = Pen(mountpoint=pen_root, source="")
+            fake_pen = Pen(mountpoint=pen_root, source=None)
 
             source = Path(src_dir) / "title.gme"
             source.write_bytes(b"payload-bytes")
 
-            with patch.object(pen, "_read_back_digest", return_value=(0, "mismatched-digest")):
+            with patch.object(pen_install, "_read_back_digest", return_value=(0, "mismatched-digest")):
                 with self.assertRaises(PenError) as ctx:
-                    pen.install_product(fake_pen, source, file_name="title.gme")
+                    pen.install_file(fake_pen, source, file_name="title.gme")
 
             self.assertIn("verification failed", str(ctx.exception))
             self.assertTrue((pen_root / "title.gme").exists())
@@ -687,13 +684,13 @@ class ReadBackVerificationTests(unittest.TestCase):
     def test_posix_fadvise_oserror_still_completes_install(self) -> None:
         with tempfile.TemporaryDirectory() as pen_dir, tempfile.TemporaryDirectory() as src_dir:
             pen_root = Path(pen_dir)
-            fake_pen = Pen(mountpoint=pen_root, source="")
+            fake_pen = Pen(mountpoint=pen_root, source=None)
 
             source = Path(src_dir) / "title.gme"
             source.write_bytes(b"payload-bytes")
 
-            with patch.object(pen.os, "posix_fadvise", side_effect=OSError("not supported")):
-                destination = pen.install_product(fake_pen, source, file_name="title.gme")
+            with patch.object(os, "posix_fadvise", side_effect=OSError("not supported")):
+                destination = pen.install_file(fake_pen, source, file_name="title.gme")
 
             self.assertEqual(destination.read_bytes(), b"payload-bytes")
 
@@ -702,7 +699,7 @@ class InstallProgressTests(unittest.TestCase):
     def test_copy_then_verify_progress_each_end_at_total(self) -> None:
         with tempfile.TemporaryDirectory() as pen_dir, tempfile.TemporaryDirectory() as src_dir:
             pen_root = Path(pen_dir)
-            fake_pen = Pen(mountpoint=pen_root, source="")
+            fake_pen = Pen(mountpoint=pen_root, source=None)
 
             source = Path(src_dir) / "title.gme"
             source.write_bytes(b"x" * 5000)
@@ -714,18 +711,18 @@ class InstallProgressTests(unittest.TestCase):
 
             # WHY: a tiny chunk size forces many read() calls so an unthrottled implementation would
             # call progress far more than ~101 times per phase
-            with patch.object(common, "CHUNK_BYTES", 100):
-                pen.install_product(fake_pen, source, file_name="title.gme", progress=record)
+            with patch.object(streams, "CHUNK_BYTES", 100):
+                pen.install_file(fake_pen, source, file_name="title.gme", progress=record)
 
             phases = [call[0] for call in calls]
-            self.assertEqual(set(phases), {pen.PHASE_COPY, pen.PHASE_VERIFY})
+            self.assertEqual(set(phases), {pen.Phase.COPY, pen.Phase.VERIFY})
 
-            last_copy_index = max(i for i, phase in enumerate(phases) if phase == pen.PHASE_COPY)
-            first_verify_index = min(i for i, phase in enumerate(phases) if phase == pen.PHASE_VERIFY)
+            last_copy_index = max(i for i, phase in enumerate(phases) if phase == pen.Phase.COPY)
+            first_verify_index = min(i for i, phase in enumerate(phases) if phase == pen.Phase.VERIFY)
             self.assertLess(last_copy_index, first_verify_index)
 
-            copy_calls = [call for call in calls if call[0] == pen.PHASE_COPY]
-            verify_calls = [call for call in calls if call[0] == pen.PHASE_VERIFY]
+            copy_calls = [call for call in calls if call[0] == pen.Phase.COPY]
+            verify_calls = [call for call in calls if call[0] == pen.Phase.VERIFY]
             self.assertEqual(copy_calls[-1][1], copy_calls[-1][2])
             self.assertEqual(verify_calls[-1][1], verify_calls[-1][2])
             self.assertLessEqual(len(copy_calls), 102)
@@ -744,7 +741,7 @@ class DeleteTitleTests(unittest.TestCase):
             self._make_pen_with_protected_dirs(pen_root)
             payload = b"payload-bytes"
             (pen_root / "title.gme").write_bytes(payload)
-            fake_pen = Pen(mountpoint=pen_root, source="")
+            fake_pen = Pen(mountpoint=pen_root, source=None)
 
             freed = pen.delete_title(fake_pen, "title.gme")
 
@@ -757,7 +754,7 @@ class DeleteTitleTests(unittest.TestCase):
     def test_refuses_protected_names(self) -> None:
         with tempfile.TemporaryDirectory() as pen_dir:
             pen_root = Path(pen_dir)
-            fake_pen = Pen(mountpoint=pen_root, source="")
+            fake_pen = Pen(mountpoint=pen_root, source=None)
             for bad_name in ("system.gme", "SONGS.gme", "Stories.GME"):
                 with self.subTest(bad_name=bad_name):
                     with self.assertRaises(PenError):
@@ -766,7 +763,7 @@ class DeleteTitleTests(unittest.TestCase):
     def test_refuses_path_traversal_names(self) -> None:
         with tempfile.TemporaryDirectory() as pen_dir:
             pen_root = Path(pen_dir)
-            fake_pen = Pen(mountpoint=pen_root, source="")
+            fake_pen = Pen(mountpoint=pen_root, source=None)
             for bad_name in ("../x.gme", "a/b.gme"):
                 with self.subTest(bad_name=bad_name):
                     with self.assertRaises(PenError):
@@ -776,7 +773,7 @@ class DeleteTitleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as pen_dir:
             pen_root = Path(pen_dir)
             (pen_root / "notes.txt").write_bytes(b"keep-me")
-            fake_pen = Pen(mountpoint=pen_root, source="")
+            fake_pen = Pen(mountpoint=pen_root, source=None)
 
             with self.assertRaises(PenError):
                 pen.delete_title(fake_pen, "notes.txt")
@@ -787,7 +784,7 @@ class DeleteTitleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as pen_dir:
             pen_root = Path(pen_dir)
             (pen_root / "x.gme").mkdir()
-            fake_pen = Pen(mountpoint=pen_root, source="")
+            fake_pen = Pen(mountpoint=pen_root, source=None)
 
             with self.assertRaises(PenError):
                 pen.delete_title(fake_pen, "x.gme")
@@ -797,7 +794,7 @@ class DeleteTitleTests(unittest.TestCase):
     def test_refuses_missing_file(self) -> None:
         with tempfile.TemporaryDirectory() as pen_dir:
             pen_root = Path(pen_dir)
-            fake_pen = Pen(mountpoint=pen_root, source="")
+            fake_pen = Pen(mountpoint=pen_root, source=None)
             with self.assertRaises(PenError):
                 pen.delete_title(fake_pen, "missing.gme")
 
@@ -807,7 +804,7 @@ class DeleteTitleTests(unittest.TestCase):
             (pen_root / "title.gme").write_bytes(b"data")
             fake_pen = Pen(mountpoint=pen_root, source="/dev/sdx1")
 
-            with patch.object(pen.os.path, "ismount", return_value=False):
+            with patch.object(os.path, "ismount", return_value=False):
                 with self.assertRaises(PenError):
                     pen.delete_title(fake_pen, "title.gme")
 
@@ -817,8 +814,8 @@ class DeleteTitleTests(unittest.TestCase):
 class MountPenTests(unittest.TestCase):
     def test_already_mounted_pen_is_returned_without_calling_udisksctl(self) -> None:
         fake_pen = Pen(mountpoint=Path("/media/tiptoi"), source="/dev/sdc1")
-        with patch.object(pen, "find_pen", return_value=fake_pen):
-            with patch.object(pen.subprocess, "run") as mock_run:
+        with patch.object(pen_detect, "find_pen", return_value=fake_pen):
+            with patch.object(subprocess, "run") as mock_run:
                 result = pen.mount_pen()
         mock_run.assert_not_called()
         self.assertEqual(result, fake_pen)
@@ -827,10 +824,10 @@ class MountPenTests(unittest.TestCase):
         fake_device = Path("/dev/sdc")
         fake_pen = Pen(mountpoint=Path("/media/tiptoi"), source="/dev/sdc1")
 
-        with patch.object(pen, "find_pen", side_effect=[PenError("no tiptoi pen found"), fake_pen]):
-            with patch.object(pen, "pen_device", return_value=fake_device):
+        with patch.object(pen_detect, "find_pen", side_effect=[PenError("no tiptoi pen found"), fake_pen]):
+            with patch.object(pen_detect, "device_path", return_value=fake_device):
                 with patch.object(
-                    pen.subprocess, "run", return_value=subprocess.CompletedProcess(args=[], returncode=0)
+                    subprocess, "run", return_value=subprocess.CompletedProcess(args=[], returncode=0)
                 ) as mock_run:
                     result = pen.mount_pen()
 
@@ -843,9 +840,9 @@ class MountPenTests(unittest.TestCase):
         self.assertEqual(result, fake_pen)
 
     def test_no_device_raises_and_does_not_call_udisksctl(self) -> None:
-        with patch.object(pen, "find_pen", side_effect=PenError("no tiptoi pen found")):
-            with patch.object(pen, "pen_device", return_value=None):
-                with patch.object(pen.subprocess, "run") as mock_run:
+        with patch.object(pen_detect, "find_pen", side_effect=PenError("no tiptoi pen found")):
+            with patch.object(pen_detect, "device_path", return_value=None):
+                with patch.object(subprocess, "run") as mock_run:
                     with self.assertRaises(PenError):
                         pen.mount_pen()
         mock_run.assert_not_called()
@@ -859,9 +856,9 @@ class UnmountPenTests(unittest.TestCase):
         def record_sync() -> None:
             calls.append("sync")
 
-        with patch.object(pen.os, "sync", side_effect=record_sync) as mock_sync:
+        with patch.object(os, "sync", side_effect=record_sync) as mock_sync:
             with patch.object(
-                pen.subprocess, "run", return_value=subprocess.CompletedProcess(args=[], returncode=0)
+                subprocess, "run", return_value=subprocess.CompletedProcess(args=[], returncode=0)
             ) as mock_run:
                 pen.unmount_pen(fake_pen)
 
@@ -874,17 +871,17 @@ class UnmountPenTests(unittest.TestCase):
         )
 
     def test_override_pen_raises_and_does_not_call_subprocess(self) -> None:
-        fake_pen = Pen(mountpoint=Path("/some/folder"), source="")
-        with patch.object(pen.subprocess, "run") as mock_run:
+        fake_pen = Pen(mountpoint=Path("/some/folder"), source=None)
+        with patch.object(subprocess, "run") as mock_run:
             with self.assertRaises(PenError):
                 pen.unmount_pen(fake_pen)
         mock_run.assert_not_called()
 
     def test_nonzero_exit_surfaces_stderr(self) -> None:
         fake_pen = Pen(mountpoint=Path("/media/tiptoi"), source="/dev/sdc1")
-        with patch.object(pen.os, "sync"):
+        with patch.object(os, "sync"):
             with patch.object(
-                pen.subprocess,
+                subprocess,
                 "run",
                 return_value=subprocess.CompletedProcess(
                     args=[], returncode=1, stderr="Error unmounting /dev/sdc1: target is busy.\n"
@@ -896,16 +893,16 @@ class UnmountPenTests(unittest.TestCase):
 
     def test_missing_udisksctl_binary_raises(self) -> None:
         fake_pen = Pen(mountpoint=Path("/media/tiptoi"), source="/dev/sdc1")
-        with patch.object(pen.os, "sync"):
-            with patch.object(pen.subprocess, "run", side_effect=FileNotFoundError()):
+        with patch.object(os, "sync"):
+            with patch.object(subprocess, "run", side_effect=FileNotFoundError()):
                 with self.assertRaises(PenError):
                     pen.unmount_pen(fake_pen)
 
     def test_timeout_raises(self) -> None:
         fake_pen = Pen(mountpoint=Path("/media/tiptoi"), source="/dev/sdc1")
-        with patch.object(pen.os, "sync"):
+        with patch.object(os, "sync"):
             with patch.object(
-                pen.subprocess, "run", side_effect=subprocess.TimeoutExpired(cmd="udisksctl", timeout=60)
+                subprocess, "run", side_effect=subprocess.TimeoutExpired(cmd="udisksctl", timeout=60)
             ):
                 with self.assertRaises(PenError):
                     pen.unmount_pen(fake_pen)
@@ -918,20 +915,20 @@ class PenDeviceTests(unittest.TestCase):
             real_device.touch()
             fake_link = Path(tmp_dir) / "tiptoi"
             fake_link.symlink_to(real_device)
-            with patch.object(pen, "PEN_BY_LABEL_PATH", fake_link):
-                self.assertEqual(pen.pen_device(), real_device.resolve())
+            with patch.object(pen_detect, "PEN_BY_LABEL_PATH", fake_link):
+                self.assertEqual(pen_detect.device_path(), real_device.resolve())
 
     def test_returns_none_when_symlink_absent(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             fake_link = Path(tmp_dir) / "tiptoi"
-            with patch.object(pen, "PEN_BY_LABEL_PATH", fake_link):
-                self.assertIsNone(pen.pen_device())
+            with patch.object(pen_detect, "PEN_BY_LABEL_PATH", fake_link):
+                self.assertIsNone(pen_detect.device_path())
 
 
 class PenDeviceMountedTests(unittest.TestCase):
     def test_false_when_no_device(self) -> None:
-        with patch.object(pen, "pen_device", return_value=None):
-            self.assertFalse(pen.pen_device_mounted())
+        with patch.object(pen_detect, "device_path", return_value=None):
+            self.assertFalse(pen.device_mounted())
 
     def test_true_when_resolved_device_is_a_mounts_source(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -940,9 +937,9 @@ class PenDeviceMountedTests(unittest.TestCase):
             mounts_file = Path(tmp_dir) / "mounts"
             mounts_file.write_text(f"{device} /media/tiptoi vfat rw,relatime 0 0\n")
 
-            with patch.object(pen, "pen_device", return_value=device):
-                with patch.object(pen, "PROC_MOUNTS", mounts_file):
-                    self.assertTrue(pen.pen_device_mounted())
+            with patch.object(pen_detect, "device_path", return_value=device):
+                with patch.object(pen_detect, "PROC_MOUNTS", mounts_file):
+                    self.assertTrue(pen.device_mounted())
 
     def test_false_when_device_not_among_mounts_sources(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -953,9 +950,9 @@ class PenDeviceMountedTests(unittest.TestCase):
             mounts_file = Path(tmp_dir) / "mounts"
             mounts_file.write_text(f"{other} /media/other vfat rw 0 0\n")
 
-            with patch.object(pen, "pen_device", return_value=device):
-                with patch.object(pen, "PROC_MOUNTS", mounts_file):
-                    self.assertFalse(pen.pen_device_mounted())
+            with patch.object(pen_detect, "device_path", return_value=device):
+                with patch.object(pen_detect, "PROC_MOUNTS", mounts_file):
+                    self.assertFalse(pen.device_mounted())
 
     def test_false_when_mounts_file_unreadable(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -963,16 +960,16 @@ class PenDeviceMountedTests(unittest.TestCase):
             device.touch()
             missing_mounts = Path(tmp_dir) / "does-not-exist"
 
-            with patch.object(pen, "pen_device", return_value=device):
-                with patch.object(pen, "PROC_MOUNTS", missing_mounts):
-                    self.assertFalse(pen.pen_device_mounted())
+            with patch.object(pen_detect, "device_path", return_value=device):
+                with patch.object(pen_detect, "PROC_MOUNTS", missing_mounts):
+                    self.assertFalse(pen.device_mounted())
 
 
 class EmptyTrashTests(unittest.TestCase):
     def test_empties_both_trash_forms_and_returns_bytes_freed(self) -> None:
         with tempfile.TemporaryDirectory() as pen_dir:
             pen_root = Path(pen_dir)
-            fake_pen = Pen(mountpoint=pen_root, source="")
+            fake_pen = Pen(mountpoint=pen_root, source=None)
             uid = os.getuid()
 
             trash1_files = pen_root / f".Trash-{uid}" / "files"
@@ -998,7 +995,7 @@ class EmptyTrashTests(unittest.TestCase):
     def test_other_uid_trash_is_untouched(self) -> None:
         with tempfile.TemporaryDirectory() as pen_dir:
             pen_root = Path(pen_dir)
-            fake_pen = Pen(mountpoint=pen_root, source="")
+            fake_pen = Pen(mountpoint=pen_root, source=None)
             other_uid = os.getuid() + 12345
 
             other_dir = pen_root / f".Trash-{other_uid}" / "files"
@@ -1013,7 +1010,7 @@ class EmptyTrashTests(unittest.TestCase):
     def test_symlinked_trash_dir_is_skipped_and_outside_target_survives(self) -> None:
         with tempfile.TemporaryDirectory() as pen_dir, tempfile.TemporaryDirectory() as outside_dir:
             pen_root = Path(pen_dir)
-            fake_pen = Pen(mountpoint=pen_root, source="")
+            fake_pen = Pen(mountpoint=pen_root, source=None)
             uid = os.getuid()
 
             outside_root = Path(outside_dir)
@@ -1029,9 +1026,66 @@ class EmptyTrashTests(unittest.TestCase):
     def test_no_trash_directories_returns_zero(self) -> None:
         with tempfile.TemporaryDirectory() as pen_dir:
             pen_root = Path(pen_dir)
-            fake_pen = Pen(mountpoint=pen_root, source="")
+            fake_pen = Pen(mountpoint=pen_root, source=None)
 
             self.assertEqual(pen.empty_trash(fake_pen), 0)
+
+
+class ParseFindmntTests(unittest.TestCase):
+    def test_sourceless_row_is_not_a_pen(self) -> None:
+        # WHY: a sourceless Pen means "user-picked folder", which skips the mount check
+        payload = {"filesystems": [{"target": "/media/tiptoi", "source": None, "fstype": "vfat", "label": "tiptoi"}]}
+        self.assertEqual(pen_detect.parse_findmnt(json.dumps(payload)), [])
+
+    def test_detected_pen_is_never_a_folder(self) -> None:
+        payload = {"filesystems": [{"target": "/media/tiptoi", "source": "/dev/sdb1", "fstype": "vfat", "label": "tiptoi"}]}
+        (found,) = pen_detect.parse_findmnt(json.dumps(payload))
+        self.assertFalse(found.is_folder)
+
+    def test_override_pen_is_a_folder(self) -> None:
+        with tempfile.TemporaryDirectory() as pen_dir:
+            self.assertTrue(pen.find_pen(override=Path(pen_dir)).is_folder)
+
+
+class OSErrorWrappingTests(unittest.TestCase):
+    def test_verify_read_failure_raises_pen_error(self) -> None:
+        # WHY: the pen being unplugged mid-verify surfaces as an OSError from the read-back
+        with tempfile.TemporaryDirectory() as pen_dir, tempfile.TemporaryDirectory() as src_dir:
+            fake_pen = Pen(mountpoint=Path(pen_dir), source=None)
+            source = Path(src_dir) / "title.gme"
+            source.write_bytes(b"payload-bytes")
+            with patch.object(pen_install, "_read_back_digest", side_effect=OSError(errno.EIO, "I/O error")):
+                with self.assertRaises(PenError):
+                    pen.install_file(fake_pen, source, file_name="title.gme")
+
+    def test_directory_fsync_open_failure_raises_pen_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            with self.assertRaises(PenError):
+                pen_install.fsync_directory(Path(tmp_dir) / "missing")
+
+    def test_disk_space_failure_raises_pen_error(self) -> None:
+        fake_pen = Pen(mountpoint=Path("/nonexistent-tiptoi-pen"), source=None)
+        with self.assertRaises(PenError):
+            pen.disk_space(fake_pen)
+
+    def test_delete_stat_failure_raises_pen_error(self) -> None:
+        with tempfile.TemporaryDirectory() as pen_dir:
+            fake_pen = Pen(mountpoint=Path(pen_dir), source=None)
+            (Path(pen_dir) / "title.gme").write_bytes(b"x")
+            with patch.object(os, "unlink", side_effect=OSError(errno.EIO, "I/O error")):
+                with self.assertRaises(PenError):
+                    pen.delete_title(fake_pen, "title.gme")
+
+
+class PhasedProgressTests(unittest.TestCase):
+    def test_none_stays_none(self) -> None:
+        self.assertIsNone(pen_install._phased(None, pen.Phase.COPY))
+
+    def test_prefixes_phase(self) -> None:
+        calls = []
+        progress = pen_install._phased(lambda *args: calls.append(args), pen.Phase.VERIFY)
+        progress(1, 2)
+        self.assertEqual(calls, [(pen.Phase.VERIFY, 1, 2)])
 
 
 if __name__ == "__main__":

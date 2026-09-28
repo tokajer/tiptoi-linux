@@ -2,7 +2,7 @@
 #   - Publish a release in the GitHub UI (tag vX.Y.Z): the AppImage is attached to that release.
 #   - Actions tab -> "Release" -> "Run workflow": attaches to release v<version> if it already
 #     exists, otherwise creates it with generated notes.
-# The version comes from pyproject.toml; bump it there (and in tiptoi_linux/__init__.py) first.
+# The version comes from tiptoi_linux/__init__.py (pyproject.toml reads it from there); bump it there first.
 name: Release
 
 on:
@@ -40,11 +40,11 @@ jobs:
           EVENT: ${{ github.event_name }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
-          version="$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          version="$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' tiptoi_linux/__init__.py)"
           tag="v${version}"
           if [ "$EVENT" = "release" ]; then
             if [ "$RELEASE_TAG" != "$tag" ]; then
-              echo "::error::release tag $RELEASE_TAG does not match pyproject.toml version $version (expected $tag)"
+              echo "::error::release tag $RELEASE_TAG does not match tiptoi_linux/__init__.py version $version (expected $tag)"
               exit 1
             fi
             exists=true
@@ -126,14 +126,9 @@ jobs:
         env:
           VERSION: ${{ needs.resolve.outputs.version }}
         run: |
-          version="$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
-          package_version="$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' tiptoi_linux/__init__.py)"
+          version="$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' tiptoi_linux/__init__.py)"
           if [ "$version" != "$VERSION" ]; then
-            echo "::error::the release tag's pyproject.toml says $version, expected $VERSION"
-            exit 1
-          fi
-          if [ "$version" != "$package_version" ]; then
-            echo "::error::pyproject.toml says $version but tiptoi_linux/__init__.py says $package_version"
+            echo "::error::the release tag's tiptoi_linux/__init__.py says $version, expected $VERSION"
             exit 1
           fi
 

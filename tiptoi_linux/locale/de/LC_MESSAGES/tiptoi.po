@@ -6,8 +6,8 @@ msgid ""
 msgstr ""
 "Project-Id-Version: tiptoi-linux 0.1.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-28 22:11+0200\n"
-"PO-Revision-Date: 2026-09-28 22:11+0200\n"
+"POT-Creation-Date: 2026-09-29 00:03+0200\n"
+"PO-Revision-Date: 2026-09-29 00:05+0200\n"
 "Last-Translator: tiptoi-linux contributors\n"
 "Language-Team: German\n"
 "Language: de\n"
@@ -16,27 +16,27 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-#: tiptoi_linux/catalog.py:66
-#, python-brace-format
-msgid "refusing to follow redirect to non-https URL: {url}"
-msgstr "Weiterleitung auf eine Nicht-HTTPS-URL wird verweigert: {url}"
+#: tiptoi_linux/catalog.py:71
+msgid "refusing unsafe product name: {name!r}"
+msgstr "Unsicherer Produktname wird verweigert: {name!r}"
 
-#: tiptoi_linux/catalog.py:144
+#: tiptoi_linux/catalog.py:143
 #, python-brace-format
 msgid "refusing to download catalog over non-https URL: {url}"
-msgstr "Herunterladen des Katalogs über eine Nicht-HTTPS-URL wird verweigert: {url}"
+msgstr ""
+"Herunterladen des Katalogs über eine Nicht-HTTPS-URL wird verweigert: {url}"
 
-#: tiptoi_linux/catalog.py:152
+#: tiptoi_linux/catalog.py:151
 #, python-brace-format
 msgid "failed to download catalog from {url}: {error}"
 msgstr "Herunterladen des Katalogs von {url} fehlgeschlagen: {error}"
 
-#: tiptoi_linux/catalog.py:156
+#: tiptoi_linux/catalog.py:155
 #, python-brace-format
 msgid "catalog response from {url} exceeds {max_bytes} bytes"
 msgstr "Antwort des Katalogs von {url} überschreitet {max_bytes} Bytes"
 
-#: tiptoi_linux/catalog.py:166
+#: tiptoi_linux/catalog.py:165
 #, python-brace-format
 msgid ""
 "catalog downloaded from {url} has zero products; refusing to overwrite cache"
@@ -44,26 +44,21 @@ msgstr ""
 "Der von {url} heruntergeladene Katalog enthält keine Produkte; der Cache "
 "wird nicht überschrieben"
 
-#: tiptoi_linux/catalog.py:172
+#: tiptoi_linux/catalog.py:171
 #, python-brace-format
 msgid "cannot write catalog cache at {path}: {error}"
 msgstr "Katalog-Cache unter {path} kann nicht geschrieben werden: {error}"
 
-#: tiptoi_linux/catalog.py:193 tiptoi_linux/catalog.py:200
-#: tiptoi_linux/catalog.py:217
+#: tiptoi_linux/catalog.py:192 tiptoi_linux/catalog.py:199
+#: tiptoi_linux/catalog.py:216
 #, python-brace-format
 msgid "cannot read catalog cache at {path}: {error}"
 msgstr "Katalog-Cache unter {path} kann nicht gelesen werden: {error}"
 
-#: tiptoi_linux/catalog.py:213
+#: tiptoi_linux/catalog.py:212
 #, python-brace-format
 msgid "{error}; no cached catalog available at {path}"
 msgstr "{error}; kein zwischengespeicherter Katalog unter {path} verfügbar"
-
-#: tiptoi_linux/catalog.py:219
-#, python-brace-format
-msgid "warning: {error} - using stale cached catalog at {path}"
-msgstr "Warnung: {error} – verwende veralteten zwischengespeicherten Katalog unter {path}"
 
 #: tiptoi_linux/cli.py:31
 msgid "Manage the tiptoi pen product catalog."
@@ -119,7 +114,8 @@ msgstr "Einen Titel herunterladen (falls nötig) und installieren."
 
 #: tiptoi_linux/cli.py:80
 msgid "Validate and report what would be installed without writing to the pen."
-msgstr "Prüfen und anzeigen, was installiert würde, ohne auf den Stift zu schreiben."
+msgstr ""
+"Prüfen und anzeigen, was installiert würde, ohne auf den Stift zu schreiben."
 
 #: tiptoi_linux/cli.py:85
 msgid "List installed titles with a newer catalog version."
@@ -131,171 +127,177 @@ msgstr "Titel vom Stift löschen und seinen Papierkorb leeren."
 
 #: tiptoi_linux/cli.py:93
 msgid "On-pen file name(s), as shown by 'tiptoi pen status' (e.g. WN.gme)."
-msgstr "Dateiname(n) auf dem Stift, wie von „tiptoi pen status“ angezeigt (z. B. WN.gme)."
+msgstr ""
+"Dateiname(n) auf dem Stift, wie von „tiptoi pen status“ angezeigt (z. B. "
+"WN.gme)."
 
 #: tiptoi_linux/cli.py:96
 msgid "Delete without prompting for confirmation."
 msgstr "Ohne Rückfrage löschen."
 
-#: tiptoi_linux/cli.py:115
+#: tiptoi_linux/cli.py:112 tiptoi_linux/gui.py:744
+#, python-brace-format
+msgid "error: {message}"
+msgstr "Fehler: {message}"
+
+#: tiptoi_linux/cli.py:119
+#, python-brace-format
+msgid "warning: {error} - using stale cached catalog at {path}"
+msgstr ""
+"Warnung: {error} – verwende veralteten zwischengespeicherten Katalog unter "
+"{path}"
+
+#: tiptoi_linux/cli.py:131
 #, python-brace-format
 msgid "Catalog updated: {n} product"
 msgid_plural "Catalog updated: {n} products"
 msgstr[0] "Katalog aktualisiert: {n} Produkt"
 msgstr[1] "Katalog aktualisiert: {n} Produkte"
 
-#: tiptoi_linux/cli.py:117
+#: tiptoi_linux/cli.py:133
 #, python-brace-format
 msgid "Cache: {path}"
 msgstr "Zwischenspeicher: {path}"
 
-#: tiptoi_linux/cli.py:125 tiptoi_linux/cli.py:291 tiptoi_linux/cli.py:301
-#: tiptoi_linux/cli.py:349 tiptoi_linux/gui.py:518
-#, python-brace-format
-msgid "error: {message}"
-msgstr "Fehler: {message}"
-
-#: tiptoi_linux/cli.py:125
+#: tiptoi_linux/cli.py:140
 msgid "catalog is empty - run 'tiptoi update'"
 msgstr "Katalog ist leer – „tiptoi update“ ausführen"
 
-#: tiptoi_linux/cli.py:137
+#: tiptoi_linux/cli.py:150
 msgid "No products matching {term!r}"
 msgstr "Keine Produkte passend zu {term!r}"
 
-#: tiptoi_linux/cli.py:162 tiptoi_linux/cli.py:193
+#: tiptoi_linux/cli.py:166
+msgid "Downloading"
+msgstr "Wird heruntergeladen"
+
+#: tiptoi_linux/cli.py:167
+msgid "Copying to pen"
+msgstr "Wird auf den Stift kopiert"
+
+#: tiptoi_linux/cli.py:168
+msgid "Verifying on pen"
+msgstr "Wird auf dem Stift geprüft"
+
+#: tiptoi_linux/cli.py:175
 #, python-brace-format
 msgid "{n} bytes"
 msgstr "{n} Bytes"
 
-#: tiptoi_linux/cli.py:169
-msgid "Downloading"
-msgstr "Wird heruntergeladen"
-
-#: tiptoi_linux/cli.py:170
-msgid "Copying to pen"
-msgstr "Wird auf den Stift kopiert"
-
-#: tiptoi_linux/cli.py:171
-msgid "Verifying on pen"
-msgstr "Wird auf dem Stift geprüft"
-
-#: tiptoi_linux/cli.py:202
+#: tiptoi_linux/cli.py:204
 msgid "no product named {name!r}"
 msgstr "Kein Produkt namens {name!r}"
 
-#: tiptoi_linux/cli.py:222
+#: tiptoi_linux/cli.py:224
 #, python-brace-format
 msgid "Mountpoint: {path}"
 msgstr "Einhängepunkt: {path}"
 
-#: tiptoi_linux/cli.py:224
+#: tiptoi_linux/cli.py:226
 #, python-brace-format
 msgid "Free space: {free} of {total}"
 msgstr "Speicher: {free} frei von {total}"
 
-#: tiptoi_linux/cli.py:227
+#: tiptoi_linux/cli.py:231
 msgid "Installed titles: none"
 msgstr "Installierte Titel: keine"
 
-#: tiptoi_linux/cli.py:229
+#: tiptoi_linux/cli.py:233
 #, python-brace-format
 msgid "Installed titles ({n}):"
 msgstr "Installierte Titel ({n}):"
 
-#: tiptoi_linux/cli.py:237
+#: tiptoi_linux/cli.py:241
 #, python-brace-format
 msgid "Mounted at {path}"
 msgstr "Eingehängt unter {path}"
 
-#: tiptoi_linux/cli.py:244
+#: tiptoi_linux/cli.py:248
 msgid "Unmounted — the pen can be unplugged now"
 msgstr "Ausgehängt — der Stift kann jetzt abgezogen werden"
 
-#: tiptoi_linux/cli.py:262
+#: tiptoi_linux/cli.py:266
 #, python-brace-format
 msgid "Would install {name} to {path}"
 msgstr "Würde {name} nach {path} installieren"
 
-#: tiptoi_linux/cli.py:266
+#: tiptoi_linux/cli.py:270
 #, python-brace-format
 msgid "Installed {name} to {path} ({size}, verified on the pen)"
 msgstr "{name} nach {path} installiert ({size}, auf dem Stift geprüft)"
 
-#: tiptoi_linux/cli.py:270
+#: tiptoi_linux/cli.py:274
 msgid "Run 'tiptoi pen unmount' before unplugging the pen."
 msgstr "Vor dem Abziehen „tiptoi pen unmount“ ausführen."
 
-#: tiptoi_linux/cli.py:292
+#: tiptoi_linux/cli.py:294
 #, python-brace-format
 msgid "not installed on the pen: {names}"
 msgstr "nicht auf dem Stift installiert: {names}"
 
-#: tiptoi_linux/cli.py:302
+#: tiptoi_linux/cli.py:299
 msgid "refusing to delete without confirmation; pass --yes"
 msgstr "Löschen ohne Bestätigung wird verweigert; --yes verwenden"
 
-#: tiptoi_linux/cli.py:307
+#: tiptoi_linux/cli.py:301
 #, python-brace-format
 msgid "Titles to delete ({n}):"
 msgstr "Zu löschende Titel ({n}):"
 
-#: tiptoi_linux/cli.py:314
+#: tiptoi_linux/cli.py:308
 #, python-brace-format
 msgid "Delete {n} title from the pen and empty its trash? [y/N] "
 msgid_plural "Delete {n} titles from the pen and empty its trash? [y/N] "
 msgstr[0] "{n} Titel vom Stift löschen und den Papierkorb leeren? [y/N] "
 msgstr[1] "{n} Titel vom Stift löschen und den Papierkorb leeren? [y/N] "
 
-#: tiptoi_linux/cli.py:325
+#: tiptoi_linux/cli.py:319
 #, python-brace-format
 msgid "Deleted {name}"
 msgstr "{name} gelöscht"
 
-#: tiptoi_linux/cli.py:326
+#: tiptoi_linux/cli.py:320
 #, python-brace-format
 msgid "Freed {size}"
 msgstr "{size} freigegeben"
 
-#: tiptoi_linux/cli.py:335
+#: tiptoi_linux/cli.py:329
 msgid "All installed titles are up to date"
 msgstr "Alle installierten Titel sind aktuell"
 
-#: tiptoi_linux/download.py:45
-msgid "refusing unsafe product name: {name!r}"
-msgstr "Unsicherer Produktname wird verweigert: {name!r}"
-
-#: tiptoi_linux/download.py:145
+#: tiptoi_linux/download.py:94
 #, python-brace-format
 msgid "refusing non-.gme response ({content_type}) for {url}"
 msgstr "Nicht-.gme-Antwort ({content_type}) für {url} wird verweigert"
 
-#: tiptoi_linux/download.py:153
+#: tiptoi_linux/download.py:102
 #, python-brace-format
 msgid "refusing unverifiable response with no Content-Length for {url}"
-msgstr "Nicht überprüfbare Antwort ohne Content-Length für {url} wird verweigert"
+msgstr ""
+"Nicht überprüfbare Antwort ohne Content-Length für {url} wird verweigert"
 
-#: tiptoi_linux/download.py:172 tiptoi_linux/download.py:223
-#: tiptoi_linux/download.py:226
+#: tiptoi_linux/download.py:123 tiptoi_linux/download.py:174
+#: tiptoi_linux/download.py:177 tiptoi_linux/download.py:182
 #, python-brace-format
 msgid "failed to download {url}: {error}"
 msgstr "Herunterladen von {url} fehlgeschlagen: {error}"
 
-#: tiptoi_linux/download.py:184
+#: tiptoi_linux/download.py:136
 #, python-brace-format
 msgid "refusing to download product over non-https URL: {url}"
-msgstr "Herunterladen des Produkts über eine Nicht-HTTPS-URL wird verweigert: {url}"
+msgstr ""
+"Herunterladen des Produkts über eine Nicht-HTTPS-URL wird verweigert: {url}"
 
-#: tiptoi_linux/download.py:190
+#: tiptoi_linux/download.py:143
 msgid "refusing unsafe product version: {version!r}"
 msgstr "Unsichere Produktversion wird verweigert: {version!r}"
 
-#: tiptoi_linux/download.py:200
+#: tiptoi_linux/download.py:153
 #, python-brace-format
 msgid "cannot create cache directory {path}: {error}"
 msgstr "Cache-Verzeichnis {path} kann nicht erstellt werden: {error}"
 
-#: tiptoi_linux/download.py:232
+#: tiptoi_linux/download.py:186
 #, python-brace-format
 msgid ""
 "downloaded size {actual} for {url} does not match expected size {expected}"
@@ -303,207 +305,219 @@ msgstr ""
 "Heruntergeladene Größe {actual} für {url} stimmt nicht mit der erwarteten "
 "Größe {expected} überein"
 
-#: tiptoi_linux/download.py:241
+#: tiptoi_linux/download.py:195
 #, python-brace-format
 msgid "cannot finalize download for {url} at {path}: {error}"
-msgstr "Download für {url} kann unter {path} nicht abgeschlossen werden: {error}"
+msgstr ""
+"Download für {url} kann unter {path} nicht abgeschlossen werden: {error}"
 
-#: tiptoi_linux/gui.py:87
+#: tiptoi_linux/gui.py:160
 msgid "On pen"
 msgstr "Auf dem Stift"
 
-#: tiptoi_linux/gui.py:87
+#: tiptoi_linux/gui.py:160
 msgid "Name"
 msgstr "Titel"
 
-#: tiptoi_linux/gui.py:87
+#: tiptoi_linux/gui.py:160
 msgid "Version"
 msgstr "Version"
 
-#: tiptoi_linux/gui.py:90
-msgid "Downloading… %p%"
-msgstr "Wird heruntergeladen… %p%"
-
-#: tiptoi_linux/gui.py:91
-msgid "Copying to pen… %p%"
-msgstr "Wird auf den Stift kopiert… %p%"
-
-#: tiptoi_linux/gui.py:92
-msgid "Verifying on pen… %p%"
-msgstr "Wird auf dem Stift geprüft… %p%"
-
-#: tiptoi_linux/gui.py:96
+#: tiptoi_linux/gui.py:163
 msgid "Downloading…"
 msgstr "Wird heruntergeladen…"
 
-#: tiptoi_linux/gui.py:97
+#: tiptoi_linux/gui.py:164
 msgid "Copying to pen…"
 msgstr "Wird auf den Stift kopiert…"
 
-#: tiptoi_linux/gui.py:98
+#: tiptoi_linux/gui.py:165
 msgid "Verifying on pen…"
 msgstr "Wird auf dem Stift geprüft…"
 
-#: tiptoi_linux/gui.py:103
+#: tiptoi_linux/gui.py:171
+msgid "○ Not connected"
+msgstr "○ Nicht verbunden"
+
+#: tiptoi_linux/gui.py:173
+msgid "○ Pen plugged in but not mounted — open it in your file manager"
+msgstr "○ Stift angeschlossen, aber nicht eingehängt — im Dateimanager öffnen"
+
+#: tiptoi_linux/gui.py:176
+msgid "✓ Unmounted — safe to unplug"
+msgstr "✓ Ausgehängt — kann abgezogen werden"
+
+#: tiptoi_linux/gui.py:178
+#, python-brace-format
+msgid "● Connected — {path}"
+msgstr "● Verbunden — {path}"
+
+#: tiptoi_linux/gui.py:183
 #, python-brace-format
 msgid "On the &pen ({n})"
 msgstr "Auf &dem Stift ({n})"
 
-#: tiptoi_linux/gui.py:107
+#: tiptoi_linux/gui.py:187
 #, python-brace-format
 msgid "&Outdated ({n})"
 msgstr "&Veraltete Titel ({n})"
 
-#: tiptoi_linux/gui.py:143
+#: tiptoi_linux/gui.py:226
 msgid "On the pen"
 msgstr "Auf dem Stift"
 
-#: tiptoi_linux/gui.py:271
-msgid "&Search:"
-msgstr "&Suchen:"
-
-#: tiptoi_linux/gui.py:273
-msgid "Search products…"
-msgstr "Produkte suchen…"
-
-#: tiptoi_linux/gui.py:275
-msgid "Search products"
-msgstr "Produkte suchen"
-
-#: tiptoi_linux/gui.py:279
-msgid "Refresh"
-msgstr "Aktualisieren"
-
-#: tiptoi_linux/gui.py:289
-msgid "Products"
-msgstr "Produkte"
-
-#: tiptoi_linux/gui.py:304 tiptoi_linux/gui.py:738
-msgid "○ Not connected"
-msgstr "○ Nicht verbunden"
-
-#: tiptoi_linux/gui.py:305
-msgid "Pen connection"
-msgstr "Stiftverbindung"
-
-#: tiptoi_linux/gui.py:307
-msgid "&Detect pen"
-msgstr "S&tift suchen"
-
-#: tiptoi_linux/gui.py:308
-msgid "Detect pen"
-msgstr "Stift suchen"
-
 #: tiptoi_linux/gui.py:312
-msgid "&Choose folder…"
-msgstr "&Ordner wählen…"
+#, python-brace-format
+msgid "unexpected error: {error}"
+msgstr "unerwarteter Fehler: {error}"
 
-#: tiptoi_linux/gui.py:313 tiptoi_linux/gui.py:586
-msgid "Choose pen folder"
-msgstr "Ordner des Stifts wählen"
-
-#: tiptoi_linux/gui.py:317
-msgid "&Mount"
-msgstr "&Einhängen"
-
-#: tiptoi_linux/gui.py:318
-msgid "Mount the pen"
-msgstr "Stift einhängen"
-
-#: tiptoi_linux/gui.py:323
-msgid "&Unmount"
-msgstr "&Aushängen"
-
-#: tiptoi_linux/gui.py:324
-msgid "Unmount the pen so it can be unplugged"
-msgstr "Stift aushängen, damit er abgezogen werden kann"
-
-#: tiptoi_linux/gui.py:329
-msgid "&Install on pen"
-msgstr "Auf den Stift &kopieren"
-
-#: tiptoi_linux/gui.py:330
-msgid "Install selected"
-msgstr "Auswahl auf den Stift kopieren"
-
-#: tiptoi_linux/gui.py:335
-msgid "De&lete selected"
-msgstr "Ausgewählte lösche&n"
-
-#: tiptoi_linux/gui.py:336
-msgid "Delete selected titles from the pen"
-msgstr "Ausgewählte Titel vom Stift löschen"
-
-#: tiptoi_linux/gui.py:342
-msgid "Task progress"
-msgstr "Aufgabenfortschritt"
-
-#: tiptoi_linux/gui.py:346
+#: tiptoi_linux/gui.py:424
 msgid "Pen storage"
 msgstr "Speicher des Stifts"
 
-#: tiptoi_linux/gui.py:352
+#: tiptoi_linux/gui.py:427
+msgid "&Detect pen"
+msgstr "S&tift suchen"
+
+#: tiptoi_linux/gui.py:428
+msgid "Detect pen"
+msgstr "Stift suchen"
+
+#: tiptoi_linux/gui.py:433
+msgid "&Choose folder…"
+msgstr "&Ordner wählen…"
+
+#: tiptoi_linux/gui.py:434 tiptoi_linux/gui.py:853
+msgid "Choose pen folder"
+msgstr "Ordner des Stifts wählen"
+
+#: tiptoi_linux/gui.py:438
 msgid "Titles on the pen"
 msgstr "Titel auf dem Stift"
 
-#: tiptoi_linux/gui.py:360
+#: tiptoi_linux/gui.py:444
 msgid "Outdated titles"
 msgstr "Veraltete Titel"
 
-#: tiptoi_linux/gui.py:396
+#: tiptoi_linux/gui.py:448
+msgid "De&lete selected"
+msgstr "Ausgewählte lösche&n"
+
+#: tiptoi_linux/gui.py:449
+msgid "Delete selected titles from the pen"
+msgstr "Ausgewählte Titel vom Stift löschen"
+
+#: tiptoi_linux/gui.py:458
 msgid "Storage"
 msgstr "Speicher"
 
-#: tiptoi_linux/gui.py:465
+#: tiptoi_linux/gui.py:504
+#, python-brace-format
+msgid "{free} free of {total}"
+msgstr "{free} frei von {total}"
+
+#: tiptoi_linux/gui.py:545
+msgid "Task progress"
+msgstr "Aufgabenfortschritt"
+
+#: tiptoi_linux/gui.py:573
+msgid "Pen connection"
+msgstr "Stiftverbindung"
+
+#: tiptoi_linux/gui.py:575
+msgid "&Mount"
+msgstr "&Einhängen"
+
+#: tiptoi_linux/gui.py:576
+msgid "Mount the pen"
+msgstr "Stift einhängen"
+
+#: tiptoi_linux/gui.py:583
+msgid "&Unmount"
+msgstr "&Aushängen"
+
+#: tiptoi_linux/gui.py:584
+msgid "Unmount the pen so it can be unplugged"
+msgstr "Stift aushängen, damit er abgezogen werden kann"
+
+#: tiptoi_linux/gui.py:612
+msgid "&Search:"
+msgstr "&Suchen:"
+
+#: tiptoi_linux/gui.py:614
+msgid "Search products…"
+msgstr "Produkte suchen…"
+
+#: tiptoi_linux/gui.py:616
+msgid "Search products"
+msgstr "Produkte suchen"
+
+#: tiptoi_linux/gui.py:620
+msgid "Refresh"
+msgstr "Aktualisieren"
+
+#: tiptoi_linux/gui.py:630
+msgid "Products"
+msgstr "Produkte"
+
+#: tiptoi_linux/gui.py:639
+msgid "&Install on pen"
+msgstr "Auf den Stift &kopieren"
+
+#: tiptoi_linux/gui.py:640
+msgid "Install selected"
+msgstr "Auswahl auf den Stift kopieren"
+
+#: tiptoi_linux/gui.py:696
 msgid "Loading…"
 msgstr "Wird geladen…"
 
-#: tiptoi_linux/gui.py:506
+#: tiptoi_linux/gui.py:722
 #, python-brace-format
 msgid "{n} product (offline — cached copy) · {path}"
 msgid_plural "{n} products (offline — cached copy) · {path}"
 msgstr[0] "{n} Produkt (offline — zwischengespeicherte Kopie) · {path}"
 msgstr[1] "{n} Produkte (offline — zwischengespeicherte Kopie) · {path}"
 
-#: tiptoi_linux/gui.py:511
+#: tiptoi_linux/gui.py:727
 #, python-brace-format
 msgid "{n} product · {path}"
 msgid_plural "{n} products · {path}"
 msgstr[0] "{n} Produkt · {path}"
 msgstr[1] "{n} Produkte · {path}"
 
-#: tiptoi_linux/gui.py:581
+#: tiptoi_linux/gui.py:848
 msgid "Detecting pen…"
 msgstr "Stift wird gesucht…"
 
-#: tiptoi_linux/gui.py:596
+#: tiptoi_linux/gui.py:867
 msgid "Mounting pen…"
 msgstr "Stift wird eingehängt…"
 
-#: tiptoi_linux/gui.py:601
+#: tiptoi_linux/gui.py:868
 #, python-brace-format
 msgid "Pen mounted: {path}"
 msgstr "Stift eingehängt: {path}"
 
-#: tiptoi_linux/gui.py:611
+#: tiptoi_linux/gui.py:887
 msgid "Unmounting pen…"
 msgstr "Stift wird ausgehängt…"
 
-#: tiptoi_linux/gui.py:617
+#: tiptoi_linux/gui.py:892
 msgid "Pen unmounted — safe to unplug"
 msgstr "Stift ausgehängt — kann abgezogen werden"
 
-#: tiptoi_linux/gui.py:632
+#: tiptoi_linux/gui.py:907
 #, python-brace-format
 msgid "Installing {name}…"
 msgstr "{name} wird installiert…"
 
-#: tiptoi_linux/gui.py:636
+#: tiptoi_linux/gui.py:908
 #, python-brace-format
 msgid "Installed {name} — verified on the pen"
 msgstr "{name} installiert — auf dem Stift geprüft"
 
-#: tiptoi_linux/gui.py:642
+#: tiptoi_linux/gui.py:918
 #, python-brace-format
 msgid ""
 "{name} was installed and verified on the pen.\n"
@@ -514,7 +528,7 @@ msgstr ""
 "\n"
 "Vor dem Abziehen auf „Aushängen“ klicken."
 
-#: tiptoi_linux/gui.py:658
+#: tiptoi_linux/gui.py:933
 #, python-brace-format
 msgid ""
 "Delete these titles from the pen?\n"
@@ -529,109 +543,106 @@ msgstr ""
 "\n"
 "Der Papierkorb des Stifts wird ebenfalls geleert."
 
-#: tiptoi_linux/gui.py:674
+#: tiptoi_linux/gui.py:950
 #, python-brace-format
 msgid "Deleting {n} title…"
 msgid_plural "Deleting {n} titles…"
 msgstr[0] "{n} Titel wird gelöscht…"
 msgstr[1] "{n} Titel werden gelöscht…"
 
-#: tiptoi_linux/gui.py:684
+#: tiptoi_linux/gui.py:952
 #, python-brace-format
 msgid "Deleted {n} title, freed {size}"
 msgid_plural "Deleted {n} titles, freed {size}"
 msgstr[0] "{n} Titel gelöscht, {size} freigegeben"
 msgstr[1] "{n} Titel gelöscht, {size} freigegeben"
 
-#: tiptoi_linux/gui.py:702
+#: tiptoi_linux/gui.py:965 tiptoi_linux/gui.py:1003
 #, python-brace-format
 msgid "Pen ready: {path}"
 msgstr "Stift bereit: {path}"
 
-#: tiptoi_linux/gui.py:718
-#, python-brace-format
-msgid "{free} free of {total}"
-msgstr "{free} frei von {total}"
-
-#: tiptoi_linux/gui.py:729
-#, python-brace-format
-msgid "● Connected — {path}"
-msgstr "● Verbunden — {path}"
-
-#: tiptoi_linux/gui.py:732
-msgid "✓ Unmounted — safe to unplug"
-msgstr "✓ Ausgehängt — kann abgezogen werden"
-
-#: tiptoi_linux/gui.py:735
-msgid "○ Pen plugged in but not mounted — open it in your file manager"
-msgstr "○ Stift angeschlossen, aber nicht eingehängt — im Dateimanager öffnen"
-
-#: tiptoi_linux/gui.py:782
+#: tiptoi_linux/gui.py:1054
 msgid "Pen disconnected"
 msgstr "Stift getrennt"
 
-#: tiptoi_linux/gui.py:879
+#: tiptoi_linux/gui.py:1065
 msgid "Please wait until the pen operation finishes."
 msgstr "Bitte warten, bis der Stiftvorgang abgeschlossen ist."
 
-#: tiptoi_linux/gui.py:895
+#: tiptoi_linux/gui.py:1085
 msgid ""
 "error: the GUI requires PySide6 - install with: pip install tiptoi-linux[gui]"
 msgstr ""
 "Fehler: Die grafische Oberfläche benötigt PySide6 – installieren mit: pip "
 "install tiptoi-linux[gui]"
 
-#: tiptoi_linux/pen.py:59
-msgid "(unknown)"
-msgstr "(unbekannt)"
-
-#: tiptoi_linux/pen.py:60
+#: tiptoi_linux/net.py:17
 #, python-brace-format
-msgid "{name}: installed {installed}, catalog {catalog}"
-msgstr "{name}: installiert {installed}, Katalog {catalog}"
+msgid "refusing to follow redirect to non-https URL: {url}"
+msgstr "Weiterleitung auf eine Nicht-HTTPS-URL wird verweigert: {url}"
 
-#: tiptoi_linux/pen.py:68
+#: tiptoi_linux/pen/_base.py:39 tiptoi_linux/pen/install.py:62
+#, python-brace-format
+msgid "cannot read free space on pen at {path}: {error}"
+msgstr ""
+"Freier Speicher des Stifts unter {path} kann nicht gelesen werden: {error}"
+
+#: tiptoi_linux/pen/_base.py:50
+#, python-brace-format
+msgid "pen mountpoint {path} is no longer mounted"
+msgstr "Einhängepunkt {path} des Stifts ist nicht mehr eingehängt"
+
+#: tiptoi_linux/pen/_base.py:57 tiptoi_linux/pen/_base.py:62
+#, python-brace-format
+msgid "cannot fsync pen directory {path}: {error}"
+msgstr "fsync für Stiftverzeichnis {path} fehlgeschlagen: {error}"
+
+#: tiptoi_linux/pen/detect.py:20
 #, python-brace-format
 msgid "--pen override {path} is not a directory"
 msgstr "--pen-Override {path} ist kein Verzeichnis"
 
-#: tiptoi_linux/pen.py:75
+#: tiptoi_linux/pen/detect.py:26
 msgid "--pen override {path} points inside the protected folder {folder!r}"
 msgstr "--pen-Override {path} zeigt in den geschützten Ordner {folder!r}"
 
-#: tiptoi_linux/pen.py:89
+#: tiptoi_linux/pen/detect.py:42
 msgid "findmnt not found; install util-linux or pass --pen <path>"
-msgstr "findmnt nicht gefunden; util-linux installieren oder --pen <Pfad> angeben"
+msgstr ""
+"findmnt nicht gefunden; util-linux installieren oder --pen <Pfad> angeben"
 
-#: tiptoi_linux/pen.py:91
+#: tiptoi_linux/pen/detect.py:44
 msgid "findmnt timed out while looking for the tiptoi pen"
 msgstr "Zeitüberschreitung bei findmnt bei der Suche nach dem tiptoi-Stift"
 
-#: tiptoi_linux/pen.py:95
+#: tiptoi_linux/pen/detect.py:48
 #, python-brace-format
 msgid "findmnt failed (exit {code}): {error}"
 msgstr "findmnt fehlgeschlagen (Exit {code}): {error}"
 
-#: tiptoi_linux/pen.py:103
+#: tiptoi_linux/pen/detect.py:60
 #, python-brace-format
 msgid "could not parse findmnt output: {error}"
 msgstr "Ausgabe von findmnt konnte nicht verarbeitet werden: {error}"
 
-#: tiptoi_linux/pen.py:127
+#: tiptoi_linux/pen/detect.py:91
 msgid ""
 "no tiptoi pen found (looked for a {label!r}-labelled vfat/exfat volume); "
 "mount it, or pass --pen <path> to point at it directly"
 msgstr ""
-"Kein tiptoi-Stift gefunden (gesucht wurde ein vfat/exfat-Datenträger mit "
-"der Bezeichnung {label!r}); ihn einhängen oder --pen <Pfad> angeben, um "
-"direkt darauf zu verweisen"
+"Kein tiptoi-Stift gefunden (gesucht wurde ein vfat/exfat-Datenträger mit der "
+"Bezeichnung {label!r}); ihn einhängen oder --pen <Pfad> angeben, um direkt "
+"darauf zu verweisen"
 
-#: tiptoi_linux/pen.py:134
+#: tiptoi_linux/pen/detect.py:98
 #, python-brace-format
 msgid "multiple tiptoi pens found: {mountpoints}; use --pen to pick one"
-msgstr "Mehrere tiptoi-Stifte gefunden: {mountpoints}; --pen verwenden, um einen auszuwählen"
+msgstr ""
+"Mehrere tiptoi-Stifte gefunden: {mountpoints}; --pen verwenden, um einen "
+"auszuwählen"
 
-#: tiptoi_linux/pen.py:168
+#: tiptoi_linux/pen/detect.py:155
 msgid ""
 "udisksctl not found; install udisks2 or (un)mount the pen in your file "
 "manager"
@@ -639,70 +650,46 @@ msgstr ""
 "udisksctl nicht gefunden; udisks2 installieren oder den Stift im "
 "Dateimanager ein-/aushängen"
 
-#: tiptoi_linux/pen.py:171
+#: tiptoi_linux/pen/detect.py:158
 msgid "udisksctl timed out"
 msgstr "Zeitüberschreitung bei udisksctl"
 
-#: tiptoi_linux/pen.py:174
+#: tiptoi_linux/pen/detect.py:161
 #, python-brace-format
 msgid "udisksctl failed: {error}"
 msgstr "udisksctl fehlgeschlagen: {error}"
 
-#: tiptoi_linux/pen.py:185
+#: tiptoi_linux/pen/detect.py:172
 msgid "no tiptoi pen is plugged in"
 msgstr "Kein tiptoi-Stift ist angeschlossen"
 
-#: tiptoi_linux/pen.py:193
+#: tiptoi_linux/pen/detect.py:180
 msgid "this pen was chosen as a folder; unmount it in your file manager"
 msgstr "Dieser Stift wurde als Ordner ausgewählt; im Dateimanager aushängen"
 
-#: tiptoi_linux/pen.py:211
-#, python-brace-format
-msgid "cannot read pen mountpoint {path}: {error}"
-msgstr "Einhängepunkt {path} des Stifts kann nicht gelesen werden: {error}"
-
-#: tiptoi_linux/pen.py:226
+#: tiptoi_linux/pen/gme.py:23
 #, python-brace-format
 msgid "cannot read {path}: {error}"
 msgstr "{path} kann nicht gelesen werden: {error}"
 
-#: tiptoi_linux/pen.py:246
-#, python-brace-format
-msgid "cannot fsync pen directory {path}: {error}"
-msgstr "fsync für Stiftverzeichnis {path} fehlgeschlagen: {error}"
-
-#: tiptoi_linux/pen.py:297
-#, python-brace-format
-msgid "pen mountpoint {path} is no longer mounted"
-msgstr "Einhängepunkt {path} des Stifts ist nicht mehr eingehängt"
-
-#: tiptoi_linux/pen.py:302
+#: tiptoi_linux/pen/install.py:37
 msgid "refusing unsafe file name: {name!r}"
 msgstr "Unsicherer Dateiname wird verweigert: {name!r}"
 
-#: tiptoi_linux/pen.py:305
+#: tiptoi_linux/pen/install.py:40
 msgid "refusing to use non-{suffix} file name: {name!r}"
 msgstr "Dateiname ohne {suffix}-Endung wird verweigert: {name!r}"
 
-#: tiptoi_linux/pen.py:312
+#: tiptoi_linux/pen/install.py:47
 msgid "refusing to use protected file name: {name!r}"
 msgstr "Geschützter Dateiname wird verweigert: {name!r}"
 
-#: tiptoi_linux/pen.py:318
-msgid "refusing to use file name outside the pen root: {name!r}"
-msgstr "Dateiname außerhalb des Stift-Basisverzeichnisses wird verweigert: {name!r}"
-
-#: tiptoi_linux/pen.py:337
+#: tiptoi_linux/pen/install.py:54
 #, python-brace-format
 msgid "cannot stat source file {path}: {error}"
 msgstr "Quelldatei {path} kann nicht gelesen werden (stat): {error}"
 
-#: tiptoi_linux/pen.py:343
-#, python-brace-format
-msgid "cannot read free space on pen at {path}: {error}"
-msgstr "Freier Speicher des Stifts unter {path} kann nicht gelesen werden: {error}"
-
-#: tiptoi_linux/pen.py:359
+#: tiptoi_linux/pen/install.py:78
 #, python-brace-format
 msgid ""
 "not enough free space on pen: need {needed} bytes, have {available} bytes"
@@ -710,12 +697,13 @@ msgstr ""
 "Nicht genug freier Speicher auf dem Stift: benötigt {needed} Bytes, "
 "verfügbar {available} Bytes"
 
-#: tiptoi_linux/pen.py:371
+#: tiptoi_linux/pen/install.py:103
 #, python-brace-format
 msgid "cannot create temp file for {name} in {path}: {error}"
-msgstr "Temporäre Datei für {name} in {path} kann nicht erstellt werden: {error}"
+msgstr ""
+"Temporäre Datei für {name} in {path} kann nicht erstellt werden: {error}"
 
-#: tiptoi_linux/pen.py:402
+#: tiptoi_linux/pen/install.py:121
 #, python-brace-format
 msgid ""
 "copy of {name} to the pen is incomplete: wrote {written} of {required} bytes"
@@ -723,22 +711,30 @@ msgstr ""
 "Kopie von {name} auf den Stift ist unvollständig: {written} von {required} "
 "Bytes geschrieben"
 
-#: tiptoi_linux/pen.py:409
+#: tiptoi_linux/pen/install.py:128
 #, python-brace-format
 msgid "cannot install {name} onto pen: {error}"
 msgstr "{name} kann nicht auf den Stift installiert werden: {error}"
 
-#: tiptoi_linux/pen.py:422
+#: tiptoi_linux/pen/install.py:145
 #, python-brace-format
 msgid "cannot open {name} on the pen to fsync after install: {error}"
-msgstr "{name} kann nach der Installation nicht zum fsync auf dem Stift geöffnet werden: {error}"
+msgstr ""
+"{name} kann nach der Installation nicht zum fsync auf dem Stift geöffnet "
+"werden: {error}"
 
-#: tiptoi_linux/pen.py:428
+#: tiptoi_linux/pen/install.py:151
 #, python-brace-format
 msgid "cannot fsync {name} on the pen after install: {error}"
-msgstr "fsync für {name} auf dem Stift nach der Installation fehlgeschlagen: {error}"
+msgstr ""
+"fsync für {name} auf dem Stift nach der Installation fehlgeschlagen: {error}"
 
-#: tiptoi_linux/pen.py:446
+#: tiptoi_linux/pen/install.py:193
+#, python-brace-format
+msgid "cannot verify {name} on the pen: {error}"
+msgstr "{name} kann auf dem Stift nicht überprüft werden: {error}"
+
+#: tiptoi_linux/pen/install.py:200
 #, python-brace-format
 msgid ""
 "verification failed for {name} on the pen: the data read back does not match"
@@ -746,17 +742,32 @@ msgstr ""
 "Prüfung von {name} auf dem Stift fehlgeschlagen: die zurückgelesenen Daten "
 "stimmen nicht überein"
 
-#: tiptoi_linux/pen.py:521
+#: tiptoi_linux/pen/library.py:26
+msgid "(unknown)"
+msgstr "(unbekannt)"
+
+#: tiptoi_linux/pen/library.py:27
+#, python-brace-format
+msgid "{name}: installed {installed}, catalog {catalog}"
+msgstr "{name}: installiert {installed}, Katalog {catalog}"
+
+#: tiptoi_linux/pen/library.py:36
+#, python-brace-format
+msgid "cannot read pen mountpoint {path}: {error}"
+msgstr "Einhängepunkt {path} des Stifts kann nicht gelesen werden: {error}"
+
+#: tiptoi_linux/pen/library.py:109
 #, python-brace-format
 msgid "cannot empty pen trash directory {path}: {error}"
-msgstr "Papierkorb-Verzeichnis {path} des Stifts kann nicht geleert werden: {error}"
+msgstr ""
+"Papierkorb-Verzeichnis {path} des Stifts kann nicht geleert werden: {error}"
 
-#: tiptoi_linux/pen.py:533
+#: tiptoi_linux/pen/library.py:120
 #, python-brace-format
 msgid "{name} is not a title on the pen"
 msgstr "{name} ist kein Titel auf dem Stift"
 
-#: tiptoi_linux/pen.py:539
+#: tiptoi_linux/pen/library.py:126
 #, python-brace-format
 msgid "cannot delete {name} from the pen: {error}"
 msgstr "{name} kann nicht vom Stift gelöscht werden: {error}"

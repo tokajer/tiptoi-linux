@@ -5,14 +5,14 @@ from __future__ import annotations
 import csv
 import io
 import os
-import sys
 import tempfile
 import time
 import urllib.parse
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
-from tiptoi_linux.common import https_opener
+from tiptoi_linux.net import https_opener
 from tiptoi_linux.errors import TiptoiError
 from tiptoi_linux.i18n import _
 
@@ -28,23 +28,13 @@ class CatalogError(TiptoiError):
 
 @dataclass(frozen=True)
 class Product:
-    series_id: str
     version: str
     url: str
     name: str
 
 
 @dataclass(frozen=True)
-class Firmware:
-    version: str
-    checksum: str
-    url: str
-
-
-@dataclass(frozen=True)
 class Catalog:
-    csv_version: str
-    firmware: Firmware | None
     products: tuple[Product, ...]
 
     def by_name(self, name: str) -> Product | None:
@@ -59,6 +49,29 @@ class Catalog:
         return [product for product in self.products if needle in product.name.lower()]
 
 
+@dataclass(frozen=True)
+class LoadedCatalog:
+    catalog: Catalog
+    # WHY: set when the network refresh failed and the catalog came from an expired cache instead;
+    # callers decide how to surface it (the CLI prints a warning, the GUI marks the status bar)
+    stale_reason: str | None = None
+
+
+def is_safe_file_name(name: str) -> bool:
+    if name in ("", ".", ".."):
+        return False
+    if "/" in name or "\\" in name or "\0" in name:
+        return False
+    return name == Path(name).name
+
+
+def gme_file_name(product: Product) -> str:
+    """The file name a product has in the download cache and on the pen."""
+    if not is_safe_file_name(product.name):
+        raise CatalogError(_("refusing unsafe product name: {name!r}").format(name=product.name))
+    return f"{product.name}{GME_SUFFIX}"
+
+
 def _fallback_name(url: str) -> str:
     basename = urllib.parse.unquote(url.rsplit("/", 1)[-1])
     if basename.lower().endswith(GME_SUFFIX):
@@ -68,14 +81,6 @@ def _fallback_name(url: str) -> str:
 
 def parse_catalog(text: str) -> Catalog:
     rows = [row for row in csv.reader(io.StringIO(text)) if row]
-
-    csv_version = ""
-    firmware: Firmware | None = None
-    if len(rows) >= 2:
-        firmware_row = rows[1]
-        if len(firmware_row) == 4 and firmware_row[3].startswith("http"):
-            csv_version = firmware_row[0]
-            firmware = Firmware(version=firmware_row[1], checksum=firmware_row[2], url=firmware_row[3])
 
     item_rows = rows
     for idx, row in enumerate(rows):
@@ -89,16 +94,16 @@ def parse_catalog(text: str) -> Catalog:
     for row in item_rows:
         if len(row) != 4:
             continue
-        series_id, version, url, file_name = row
+        _series_id, version, url, file_name = row
         if not url:
             continue
         if not url.lower().endswith(GME_SUFFIX):
             # excludes non-product rows (e.g. the OTA firmware .bin row)
             continue
         name = file_name if file_name else _fallback_name(url)
-        products.append(Product(series_id=series_id, version=version, url=url, name=name))
+        products.append(Product(version=version, url=url, name=name))
 
-    return Catalog(csv_version=csv_version, firmware=firmware, products=tuple(products))
+    return Catalog(products=tuple(products))
 
 
 def cache_path() -> Path:
@@ -126,7 +131,12 @@ def _atomic_write(path: Path, text: str) -> None:
         raise
 
 
-def download_catalog(url: str = CATALOG_URL, *, cache: Path | None = None) -> Catalog:
+def download_catalog(
+    url: str = CATALOG_URL,
+    *,
+    cache: Path | None = None,
+    opener: urllib.request.OpenerDirector = https_opener,
+) -> Catalog:
     scheme = urllib.parse.urlparse(url).scheme
     if scheme != "https":
         # WHY: the catalog is a trust boundary for later .gme downloads; never follow a downgrade to http
@@ -135,7 +145,7 @@ def download_catalog(url: str = CATALOG_URL, *, cache: Path | None = None) -> Ca
     target = cache_path() if cache is None else cache
 
     try:
-        with https_opener.open(url, timeout=30) as response:
+        with opener.open(url, timeout=30) as response:
             raw = response.read(MAX_CATALOG_BYTES + 1)
     except OSError as exc:  # covers URLError, HTTPError, and timeouts
         raise CatalogError(_("failed to download catalog from {url}: {error}").format(url=url, error=exc)) from exc
@@ -170,7 +180,7 @@ def load_catalog(
     url: str = CATALOG_URL,
     cache: Path | None = None,
     allow_stale: bool = True,
-) -> Catalog:
+) -> LoadedCatalog:
     path = cache_path() if cache is None else cache
 
     if not force:
@@ -188,10 +198,10 @@ def load_catalog(
                 raise CatalogError(
                     _("cannot read catalog cache at {path}: {error}").format(path=path, error=exc)
                 ) from exc
-            return parse_catalog(text)
+            return LoadedCatalog(parse_catalog(text))
 
     try:
-        return download_catalog(url, cache=path)
+        return LoadedCatalog(download_catalog(url, cache=path))
     except CatalogError as exc:
         if not allow_stale:
             raise
@@ -205,5 +215,4 @@ def load_catalog(
             raise CatalogError(
                 _("cannot read catalog cache at {path}: {error}").format(path=path, error=read_exc)
             ) from read_exc
-        print(_("warning: {error} - using stale cached catalog at {path}").format(error=exc, path=path), file=sys.stderr)
-        return parse_catalog(text)
+        return LoadedCatalog(parse_catalog(text), stale_reason=str(exc))

@@ -19,10 +19,9 @@ try:
 except ImportError:
     _PYSIDE6_AVAILABLE = False
 
-from tiptoi_linux.catalog import CatalogError, parse_catalog
-from tiptoi_linux.download import gme_file_name
+from tiptoi_linux.catalog import CatalogError, LoadedCatalog, gme_file_name, parse_catalog
 from tiptoi_linux.gui import Column
-from tiptoi_linux.pen import OutdatedTitle, Pen, PenError, PenSummary
+from tiptoi_linux.pen import OutdatedTitle, Pen, PenError, PenSummary, Phase, pen_mount_alive
 
 FIXTURE_CSV = (
     "CSV file version,Firmware version,Firmware checksum,Firmware download address\n"
@@ -240,8 +239,8 @@ class LayoutTests(unittest.TestCase):
         self.assertEqual(self.window._splitter.count(), 2)
 
     def test_count_labels_start_at_zero(self) -> None:
-        self.assertEqual(self.window._installed_label.text(), "On the &pen (0)")
-        self.assertEqual(self.window._outdated_label.text(), "&Outdated (0)")
+        self.assertEqual(self.window._pen_panel.installed_label.text(), "On the &pen (0)")
+        self.assertEqual(self.window._pen_panel.outdated_label.text(), "&Outdated (0)")
 
 
 @unittest.skipUnless(_PYSIDE6_AVAILABLE, "PySide6 is not installed")
@@ -258,11 +257,10 @@ class ThreadingTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.catalog = parse_catalog(FIXTURE_CSV)
-        self._original_load_catalog = self.gui_module.load_catalog
-        self.window = self.gui_module.MainWindow()
+        self.services = self.gui_module.Services()
+        self.window = self.gui_module.MainWindow(services=self.services)
 
     def tearDown(self) -> None:
-        self.gui_module.load_catalog = self._original_load_catalog
         _pump_until_idle(self.app, self.window._catalog_job)
         self.window.close()
         for _ in range(20):
@@ -270,7 +268,7 @@ class ThreadingTests(unittest.TestCase):
         self.app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
     def test_successful_load_populates_model_and_status_bar(self) -> None:
-        self.gui_module.load_catalog = lambda **kwargs: self.catalog
+        self.services.load_catalog = lambda **kwargs: LoadedCatalog(self.catalog)
         self.window._start_load(force=True)
         _pump_until_idle(self.app, self.window._catalog_job)
 
@@ -282,7 +280,7 @@ class ThreadingTests(unittest.TestCase):
         def _raise(**kwargs):
             raise CatalogError("boom")
 
-        self.gui_module.load_catalog = _raise
+        self.services.load_catalog = _raise
 
         with patch.object(self.gui_module.QMessageBox, "warning"):
             self.window._start_load(force=True)
@@ -293,7 +291,7 @@ class ThreadingTests(unittest.TestCase):
         self.assertTrue(self.window._refresh_button.isEnabled())
 
     def test_no_thread_leak_after_repeated_loads(self) -> None:
-        self.gui_module.load_catalog = lambda **kwargs: self.catalog
+        self.services.load_catalog = lambda **kwargs: LoadedCatalog(self.catalog)
 
         thread_refs = []
         for _ in range(3):
@@ -337,9 +335,9 @@ class ThreadingTests(unittest.TestCase):
         # the event loop would run forever with nothing visible unless something quits explicitly.
         def slow_load(**kwargs):
             time.sleep(0.3)
-            return self.catalog
+            return LoadedCatalog(self.catalog)
 
-        self.gui_module.load_catalog = slow_load
+        self.services.load_catalog = slow_load
         self.window._start_load(force=True)
         self.assertTrue(self.window._catalog_job.is_running)
 
@@ -440,6 +438,19 @@ class BackgroundJobTests(unittest.TestCase):
         self.assertEqual(results, [42])
         self.assertEqual(failures, ["boom"])
 
+    def test_unexpected_exception_is_labelled_and_its_traceback_printed(self) -> None:
+        failures: list[str] = []
+
+        def buggy_task(progress):
+            raise AttributeError("no such thing")
+
+        with patch.object(self.gui_module.traceback, "print_exc") as mock_print_exc:
+            self.job.start(buggy_task, lambda result: None, failures.append)
+            _pump_until_idle(self.app, self.job)
+
+        mock_print_exc.assert_called_once()
+        self.assertEqual(failures, ["unexpected error: no such thing"])
+
 
 @unittest.skipUnless(_PYSIDE6_AVAILABLE, "PySide6 is not installed")
 class PenPanelTests(unittest.TestCase):
@@ -455,35 +466,21 @@ class PenPanelTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.catalog = parse_catalog(FIXTURE_CSV)
-        self._original_find_pen = self.gui_module.find_pen
-        self._original_pen_summary = self.gui_module.pen_summary
-        self._original_install_title = self.gui_module.install_title
-        self._original_delete_title = self.gui_module.delete_title
-        self._original_pen_device_present = self.gui_module.pen_device_present
-        self._original_pen_still_mounted = self.gui_module.pen_still_mounted
-        self._original_mount_pen = self.gui_module.mount_pen
-        self._original_unmount_pen = self.gui_module.unmount_pen
 
         # WHY: default to "no device, pen stays mounted" so _update_connection_label() and
         # _poll_pen() never touch the real /dev/disk/by-label/tiptoi symlink unless a test
         # explicitly overrides one of these
-        self.gui_module.pen_device_present = lambda: False
-        self.gui_module.pen_still_mounted = lambda pen: True
+        self.services = self.gui_module.Services(
+            device_plugged_in=lambda: False,
+            pen_mount_alive=lambda pen: True,
+        )
 
-        self.window = self.gui_module.MainWindow()
+        self.window = self.gui_module.MainWindow(services=self.services)
         self.window._poll_timer.stop()
         self.window._model.set_products(self.catalog.products)
         self.window._catalog = self.catalog
 
     def tearDown(self) -> None:
-        self.gui_module.find_pen = self._original_find_pen
-        self.gui_module.pen_summary = self._original_pen_summary
-        self.gui_module.install_title = self._original_install_title
-        self.gui_module.delete_title = self._original_delete_title
-        self.gui_module.pen_device_present = self._original_pen_device_present
-        self.gui_module.pen_still_mounted = self._original_pen_still_mounted
-        self.gui_module.mount_pen = self._original_mount_pen
-        self.gui_module.unmount_pen = self._original_unmount_pen
         _pump_until_idle(self.app, self.window._pen_job)
         self.window.close()
         for _ in range(20):
@@ -501,31 +498,31 @@ class PenPanelTests(unittest.TestCase):
             outdated=outdated,
         )
 
-        self.gui_module.find_pen = lambda **kwargs: fake_pen
-        self.gui_module.pen_summary = lambda pen, catalog: summary
+        self.services.find_pen = lambda **kwargs: fake_pen
+        self.services.pen_summary = lambda pen, catalog: summary
 
         self.window._detect()
         _pump_until_idle(self.app, self.window._pen_job)
 
         self.assertFalse(self.window._pen_job.is_running)
-        self.assertIs(self.window._connection, self.gui_module.ConnectionState.CONNECTED)
+        self.assertIsInstance(self.window._connection, self.gui_module.Connected)
         self.assertEqual(
-            [self.window._installed_list.item(i).text() for i in range(self.window._installed_list.count())],
+            [self.window._pen_panel.installed_list.item(i).text() for i in range(self.window._pen_panel.installed_list.count())],
             ["A.gme", "B.gme"],
         )
-        self.assertEqual(self.window._space_bar.value(), 75)
-        self.assertIn("free", self.window._space_bar.format())
+        self.assertEqual(self.window._pen_panel.space_bar.value(), 75)
+        self.assertIn("free", self.window._pen_panel.space_bar.format())
         self.assertTrue(self.window._connection_label.text().startswith("● Connected"))
         self.assertIn("/media/tiptoi", self.window._connection_label.text())
-        self.assertEqual(self.window._outdated_list.count(), 1)
-        self.assertEqual(self.window._outdated_list.item(0).text(), "A.gme: installed 1, catalog 2")
+        self.assertEqual(self.window._pen_panel.outdated_list.count(), 1)
+        self.assertEqual(self.window._pen_panel.outdated_list.item(0).text(), "A.gme: installed 1, catalog 2")
 
     def test_successful_detect_shows_status_bar_success_message(self) -> None:
         fake_pen = Pen(mountpoint=Path("/media/tiptoi"), source="/dev/sdb1")
         summary = PenSummary(pen=fake_pen, free=0, total=0, installed=(), outdated=[])
 
-        self.gui_module.find_pen = lambda **kwargs: fake_pen
-        self.gui_module.pen_summary = lambda pen, catalog: summary
+        self.services.find_pen = lambda **kwargs: fake_pen
+        self.services.pen_summary = lambda pen, catalog: summary
 
         self.window._detect()
         _pump_until_idle(self.app, self.window._pen_job)
@@ -536,7 +533,7 @@ class PenPanelTests(unittest.TestCase):
         def _raise(**kwargs):
             raise PenError("boom")
 
-        self.gui_module.find_pen = _raise
+        self.services.find_pen = _raise
 
         with patch.object(self.gui_module.QMessageBox, "warning"):
             self.window._detect()
@@ -544,14 +541,14 @@ class PenPanelTests(unittest.TestCase):
 
         self.assertFalse(self.window._pen_job.is_running)
         self.assertIn("boom", self.window.statusBar().currentMessage())
-        self.assertTrue(self.window._detect_button.isEnabled())
+        self.assertTrue(self.window._pen_panel.detect_button.isEnabled())
 
     def test_failed_detect_after_successful_detect_clears_pen_and_disables_install(self) -> None:
         fake_pen = Pen(mountpoint=Path("/media/tiptoi"), source="/dev/sdb1")
         summary = PenSummary(pen=fake_pen, free=0, total=0, installed=("A.gme",), outdated=[])
 
-        self.gui_module.find_pen = lambda **kwargs: fake_pen
-        self.gui_module.pen_summary = lambda pen, catalog: summary
+        self.services.find_pen = lambda **kwargs: fake_pen
+        self.services.pen_summary = lambda pen, catalog: summary
 
         self.window._detect()
         _pump_until_idle(self.app, self.window._pen_job)
@@ -560,7 +557,7 @@ class PenPanelTests(unittest.TestCase):
         def _raise(**kwargs):
             raise PenError("unplugged")
 
-        self.gui_module.find_pen = _raise
+        self.services.find_pen = _raise
 
         with patch.object(self.gui_module.QMessageBox, "warning"):
             self.window._detect()
@@ -569,8 +566,8 @@ class PenPanelTests(unittest.TestCase):
         self.assertIsNone(self.window._pen)
         self.assertIs(self.window._connection, self.gui_module.ConnectionState.DISCONNECTED)
         self.assertEqual(self.window._connection_label.text(), "○ Not connected")
-        self.assertEqual(self.window._installed_list.count(), 0)
-        self.assertEqual(self.window._outdated_list.count(), 0)
+        self.assertEqual(self.window._pen_panel.installed_list.count(), 0)
+        self.assertEqual(self.window._pen_panel.outdated_list.count(), 0)
         self.assertFalse(self.window._install_button.isEnabled())
 
     def test_count_labels_update_after_refresh_and_reset_after_clear(self) -> None:
@@ -578,33 +575,33 @@ class PenPanelTests(unittest.TestCase):
         outdated = [OutdatedTitle(file_name="A.gme", installed_version="1", catalog_version="2")]
         summary = PenSummary(pen=fake_pen, free=0, total=0, installed=("A.gme", "B.gme"), outdated=outdated)
 
-        self.gui_module.find_pen = lambda **kwargs: fake_pen
-        self.gui_module.pen_summary = lambda pen, catalog: summary
+        self.services.find_pen = lambda **kwargs: fake_pen
+        self.services.pen_summary = lambda pen, catalog: summary
 
         self.window._detect()
         _pump_until_idle(self.app, self.window._pen_job)
 
-        self.assertEqual(self.window._installed_label.text(), "On the &pen (2)")
-        self.assertEqual(self.window._outdated_label.text(), "&Outdated (1)")
+        self.assertEqual(self.window._pen_panel.installed_label.text(), "On the &pen (2)")
+        self.assertEqual(self.window._pen_panel.outdated_label.text(), "&Outdated (1)")
 
         def _raise(**kwargs):
             raise PenError("unplugged")
 
-        self.gui_module.find_pen = _raise
+        self.services.find_pen = _raise
 
         with patch.object(self.gui_module.QMessageBox, "warning"):
             self.window._detect()
             _pump_until_idle(self.app, self.window._pen_job)
 
-        self.assertEqual(self.window._installed_label.text(), "On the &pen (0)")
-        self.assertEqual(self.window._outdated_label.text(), "&Outdated (0)")
+        self.assertEqual(self.window._pen_panel.installed_label.text(), "On the &pen (0)")
+        self.assertEqual(self.window._pen_panel.outdated_label.text(), "&Outdated (0)")
 
     def test_install_failure_keeps_pen(self) -> None:
         fake_pen = Pen(mountpoint=Path("/media/tiptoi"), source="/dev/sdb1")
         summary = PenSummary(pen=fake_pen, free=0, total=0, installed=(), outdated=[])
 
-        self.gui_module.find_pen = lambda **kwargs: fake_pen
-        self.gui_module.pen_summary = lambda pen, catalog: summary
+        self.services.find_pen = lambda **kwargs: fake_pen
+        self.services.pen_summary = lambda pen, catalog: summary
 
         self.window._detect()
         _pump_until_idle(self.app, self.window._pen_job)
@@ -615,7 +612,7 @@ class PenPanelTests(unittest.TestCase):
         def _raise(pen, product, *, dry_run=False, progress=None):
             raise PenError("install boom")
 
-        self.gui_module.install_title = _raise
+        self.services.install_title = _raise
 
         with patch.object(self.gui_module.QMessageBox, "warning"):
             self.window._start_install_selected()
@@ -628,8 +625,8 @@ class PenPanelTests(unittest.TestCase):
         fake_pen = Pen(mountpoint=Path("/media/tiptoi"), source="/dev/sdb1")
         summary = PenSummary(pen=fake_pen, free=0, total=0, installed=(), outdated=[])
 
-        self.gui_module.find_pen = lambda **kwargs: fake_pen
-        self.gui_module.pen_summary = lambda pen, catalog: summary
+        self.services.find_pen = lambda **kwargs: fake_pen
+        self.services.pen_summary = lambda pen, catalog: summary
 
         self.window._detect()
         _pump_until_idle(self.app, self.window._pen_job)
@@ -640,7 +637,7 @@ class PenPanelTests(unittest.TestCase):
         def fake_install_title(pen, product, *, dry_run=False, progress=None):
             return Path("/media/tiptoi/title.gme")
 
-        self.gui_module.install_title = fake_install_title
+        self.services.install_title = fake_install_title
 
         with patch.object(self.gui_module.QMessageBox, "information") as mock_information:
             self.window._start_install_selected()
@@ -653,8 +650,8 @@ class PenPanelTests(unittest.TestCase):
         fake_pen = Pen(mountpoint=Path("/media/tiptoi"), source="/dev/sdb1")
         summary = PenSummary(pen=fake_pen, free=0, total=0, installed=(), outdated=[])
 
-        self.gui_module.find_pen = lambda **kwargs: fake_pen
-        self.gui_module.pen_summary = lambda pen, catalog: summary
+        self.services.find_pen = lambda **kwargs: fake_pen
+        self.services.pen_summary = lambda pen, catalog: summary
 
         self.window._detect()
         _pump_until_idle(self.app, self.window._pen_job)
@@ -670,7 +667,7 @@ class PenPanelTests(unittest.TestCase):
             recorded.append(product)
             return Path("/media/tiptoi/title.gme")
 
-        self.gui_module.install_title = fake_install_title
+        self.services.install_title = fake_install_title
 
         index = self.window._proxy.index(0, self.gui_module.Column.NAME)
 
@@ -683,7 +680,7 @@ class PenPanelTests(unittest.TestCase):
 
     def test_double_click_does_nothing_while_install_button_disabled(self) -> None:
         recorded = []
-        self.gui_module.install_title = lambda pen, product, *, dry_run=False, progress=None: recorded.append(
+        self.services.install_title = lambda pen, product, *, dry_run=False, progress=None: recorded.append(
             product
         )
 
@@ -698,7 +695,7 @@ class PenPanelTests(unittest.TestCase):
         self.assertFalse(self.window._pen_job.is_running)
 
     def test_on_task_progress_shows_copy_phase_in_bar_format_and_value(self) -> None:
-        self.window._on_task_progress(self.gui_module.PHASE_COPY, 50, 100)
+        self.window._on_task_progress(Phase.COPY, 50, 100)
 
         self.assertIn("Copying", self.window._progress_bar.format())
         self.assertEqual(self.window._progress_bar.value(), 50)
@@ -709,7 +706,7 @@ class PenPanelTests(unittest.TestCase):
         self.window._table.selectRow(0)
         self.assertFalse(self.window._install_button.isEnabled())
 
-        self.window._pen = Pen(mountpoint=Path("/media/tiptoi"), source="")
+        self.window._connection = self.gui_module.Connected(Pen(mountpoint=Path("/media/tiptoi"), source=None))
         self.window._table.clearSelection()
         self.assertFalse(self.window._install_button.isEnabled())
 
@@ -717,7 +714,7 @@ class PenPanelTests(unittest.TestCase):
         self.assertTrue(self.window._install_button.isEnabled())
 
     def test_install_stays_disabled_while_task_in_flight_even_on_selection_change(self) -> None:
-        self.window._pen = Pen(mountpoint=Path("/media/tiptoi"), source="")
+        self.window._connection = self.gui_module.Connected(Pen(mountpoint=Path("/media/tiptoi"), source=None))
         self.window._table.selectRow(0)
         self.assertTrue(self.window._install_button.isEnabled())
 
@@ -735,32 +732,32 @@ class PenPanelTests(unittest.TestCase):
             self.window._pen_job._thread = None
 
     def test_delete_button_disabled_without_pen_or_selection(self) -> None:
-        self.window._installed_list.addItem("A.gme")
+        self.window._pen_panel.installed_list.addItem("A.gme")
 
-        self.assertFalse(self.window._delete_button.isEnabled())
+        self.assertFalse(self.window._pen_panel.delete_button.isEnabled())
 
-        self.window._installed_list.item(0).setSelected(True)
-        self.assertFalse(self.window._delete_button.isEnabled())
+        self.window._pen_panel.installed_list.item(0).setSelected(True)
+        self.assertFalse(self.window._pen_panel.delete_button.isEnabled())
 
-        self.window._pen = Pen(mountpoint=Path("/media/tiptoi"), source="")
-        self.window._installed_list.clearSelection()
-        self.assertFalse(self.window._delete_button.isEnabled())
+        self.window._connection = self.gui_module.Connected(Pen(mountpoint=Path("/media/tiptoi"), source=None))
+        self.window._pen_panel.installed_list.clearSelection()
+        self.assertFalse(self.window._pen_panel.delete_button.isEnabled())
 
-        self.window._installed_list.item(0).setSelected(True)
-        self.assertTrue(self.window._delete_button.isEnabled())
+        self.window._pen_panel.installed_list.item(0).setSelected(True)
+        self.assertTrue(self.window._pen_panel.delete_button.isEnabled())
 
     def test_delete_button_disabled_while_task_in_flight(self) -> None:
-        self.window._pen = Pen(mountpoint=Path("/media/tiptoi"), source="")
-        self.window._installed_list.addItem("A.gme")
-        self.window._installed_list.item(0).setSelected(True)
-        self.assertTrue(self.window._delete_button.isEnabled())
+        self.window._connection = self.gui_module.Connected(Pen(mountpoint=Path("/media/tiptoi"), source=None))
+        self.window._pen_panel.installed_list.addItem("A.gme")
+        self.window._pen_panel.installed_list.item(0).setSelected(True)
+        self.assertTrue(self.window._pen_panel.delete_button.isEnabled())
 
         # WHY: simulate a task in flight without actually running one, mirroring the install
         # button's equivalent test above
         self.window._pen_job._thread = object()
         try:
             self.window._update_delete_button_enabled()
-            self.assertFalse(self.window._delete_button.isEnabled())
+            self.assertFalse(self.window._pen_panel.delete_button.isEnabled())
         finally:
             self.window._pen_job._thread = None
 
@@ -768,39 +765,39 @@ class PenPanelTests(unittest.TestCase):
         self.window._pen_job._thread = object()
         try:
             # mount's own precondition (device present, no pen) would otherwise enable it
-            self.gui_module.pen_device_present = lambda: True
-            self.window._pen = None
+            self.services.device_plugged_in = lambda: True
+            self.window._connection = self.gui_module.ConnectionState.DISCONNECTED
             self.window._update_action_buttons_enabled()
-            self.assertFalse(self.window._detect_button.isEnabled())
-            self.assertFalse(self.window._choose_button.isEnabled())
+            self.assertFalse(self.window._pen_panel.detect_button.isEnabled())
+            self.assertFalse(self.window._pen_panel.choose_button.isEnabled())
             self.assertFalse(self.window._mount_button.isEnabled())
 
             # unmount/install/delete's own preconditions (a detected pen, a selection) would
             # otherwise enable them
-            self.window._pen = Pen(mountpoint=Path("/media/tiptoi"), source="/dev/sdb1")
+            self.window._connection = self.gui_module.Connected(Pen(mountpoint=Path("/media/tiptoi"), source="/dev/sdb1"))
             self.window._table.selectRow(0)
-            self.window._installed_list.addItem("A.gme")
-            self.window._installed_list.item(0).setSelected(True)
+            self.window._pen_panel.installed_list.addItem("A.gme")
+            self.window._pen_panel.installed_list.item(0).setSelected(True)
             self.window._update_action_buttons_enabled()
             self.assertFalse(self.window._unmount_button.isEnabled())
             self.assertFalse(self.window._install_button.isEnabled())
-            self.assertFalse(self.window._delete_button.isEnabled())
+            self.assertFalse(self.window._pen_panel.delete_button.isEnabled())
         finally:
             self.window._pen_job._thread = None
-            self.window._pen = None
+            self.window._connection = self.gui_module.ConnectionState.DISCONNECTED
 
     def test_delete_confirmed_calls_delete_title_per_selected_title_and_refreshes(self) -> None:
-        fake_pen = Pen(mountpoint=Path("/media/tiptoi"), source="")
-        self.window._pen = fake_pen
-        self.window._installed_list.addItem("A.gme")
-        self.window._installed_list.addItem("B.gme")
+        fake_pen = Pen(mountpoint=Path("/media/tiptoi"), source=None)
+        self.window._connection = self.gui_module.Connected(fake_pen)
+        self.window._pen_panel.installed_list.addItem("A.gme")
+        self.window._pen_panel.installed_list.addItem("B.gme")
         # WHY: mirrors what a real prior detect leaves behind, so _update_installed_list() (which
         # no-ops when the new tuple equals the tracked one) actually clears the list below
-        self.window._installed_names = ("A.gme", "B.gme")
-        self.window._installed_list.item(0).setSelected(True)
-        self.window._installed_list.item(1).setSelected(True)
+        self.window._pen_panel._installed_names = ("A.gme", "B.gme")
+        self.window._pen_panel.installed_list.item(0).setSelected(True)
+        self.window._pen_panel.installed_list.item(1).setSelected(True)
 
-        self.gui_module.pen_summary = lambda pen, catalog: PenSummary(
+        self.services.pen_summary = lambda pen, catalog: PenSummary(
             pen=fake_pen, free=0, total=0, installed=(), outdated=[]
         )
 
@@ -810,7 +807,7 @@ class PenPanelTests(unittest.TestCase):
             deleted.append((pen, file_name))
             return 100
 
-        self.gui_module.delete_title = fake_delete_title
+        self.services.delete_title = fake_delete_title
 
         with patch.object(
             self.gui_module.QMessageBox,
@@ -824,14 +821,64 @@ class PenPanelTests(unittest.TestCase):
         self.assertEqual(len(deleted), 2)
         self.assertEqual({pen for pen, _name in deleted}, {fake_pen})
         self.assertEqual({name for _pen, name in deleted}, {"A.gme", "B.gme"})
-        self.assertEqual(self.window._installed_list.count(), 0)
+        self.assertEqual(self.window._pen_panel.installed_list.count(), 0)
         self.assertIn("Deleted 2 titles", self.window.statusBar().currentMessage())
 
+    def test_partial_delete_failure_refreshes_lists_and_keeps_error_visible(self) -> None:
+        fake_pen = Pen(mountpoint=Path("/media/tiptoi"), source=None)
+        self.window._connection = self.gui_module.Connected(fake_pen)
+        for name in ("A.gme", "B.gme"):
+            self.window._pen_panel.installed_list.addItem(name)
+        self.window._pen_panel._installed_names = ("A.gme", "B.gme")
+        self.window._pen_panel.installed_list.selectAll()
+
+        # WHY: A.gme is gone by the time B.gme fails - the refresh must show that
+        self.services.pen_summary = lambda pen, catalog: PenSummary(
+            pen=fake_pen, free=0, total=0, installed=("B.gme",), outdated=[]
+        )
+
+        def fake_delete_title(pen, file_name):
+            if file_name == "B.gme":
+                raise PenError("delete boom")
+            return 100
+
+        self.services.delete_title = fake_delete_title
+
+        with (
+            patch.object(
+                self.gui_module.QMessageBox,
+                "question",
+                return_value=self.gui_module.QMessageBox.StandardButton.Yes,
+            ),
+            patch.object(self.gui_module.QMessageBox, "warning") as mock_warning,
+        ):
+            self.window._start_delete_selected()
+            _pump_until_idle(self.app, self.window._pen_job)
+            _pump_until_idle(self.app, self.window._pen_job)
+
+        mock_warning.assert_called_once()
+        items = [self.window._pen_panel.installed_list.item(i).text() for i in range(self.window._pen_panel.installed_list.count())]
+        self.assertEqual(items, ["B.gme"])
+        self.assertIn("delete boom", self.window.statusBar().currentMessage())
+
+    def test_failed_detect_does_not_trigger_a_refresh(self) -> None:
+        self.services.find_pen = lambda **kwargs: (_ for _ in ()).throw(PenError("no pen"))
+        summaries: list[object] = []
+        self.services.pen_summary = lambda pen, catalog: summaries.append(pen)
+
+        with patch.object(self.gui_module.QMessageBox, "warning"):
+            self.window._detect()
+            _pump_until_idle(self.app, self.window._pen_job)
+            _pump_until_idle(self.app, self.window._pen_job)
+
+        self.assertEqual(summaries, [])
+        self.assertFalse(self.window._pen_job.is_running)
+
     def test_delete_declined_calls_delete_title_for_nothing(self) -> None:
-        fake_pen = Pen(mountpoint=Path("/media/tiptoi"), source="")
-        self.window._pen = fake_pen
-        self.window._installed_list.addItem("A.gme")
-        self.window._installed_list.item(0).setSelected(True)
+        fake_pen = Pen(mountpoint=Path("/media/tiptoi"), source=None)
+        self.window._connection = self.gui_module.Connected(fake_pen)
+        self.window._pen_panel.installed_list.addItem("A.gme")
+        self.window._pen_panel.installed_list.item(0).setSelected(True)
 
         called = False
 
@@ -840,7 +887,7 @@ class PenPanelTests(unittest.TestCase):
             called = True
             return 0
 
-        self.gui_module.delete_title = fake_delete_title
+        self.services.delete_title = fake_delete_title
 
         with patch.object(
             self.gui_module.QMessageBox,
@@ -851,7 +898,7 @@ class PenPanelTests(unittest.TestCase):
 
         self.assertFalse(called)
         self.assertFalse(self.window._pen_job.is_running)
-        self.assertEqual(self.window._installed_list.count(), 1)
+        self.assertEqual(self.window._pen_panel.installed_list.count(), 1)
 
     def test_close_event_ignored_while_task_thread_set(self) -> None:
         self.window._pen_job._thread = object()
@@ -865,8 +912,8 @@ class PenPanelTests(unittest.TestCase):
             self.window._pen_job._thread = None
 
     def test_install_uses_correct_product_when_table_sorted_reverse(self) -> None:
-        fake_pen = Pen(mountpoint=Path("/media/tiptoi"), source="")
-        self.window._pen = fake_pen
+        fake_pen = Pen(mountpoint=Path("/media/tiptoi"), source=None)
+        self.window._connection = self.gui_module.Connected(fake_pen)
 
         self.window._table.sortByColumn(self.gui_module.Column.NAME, Qt.SortOrder.DescendingOrder)
 
@@ -883,8 +930,8 @@ class PenPanelTests(unittest.TestCase):
             recorded.append((pen, product))
             return Path("/media/tiptoi") / f"{product.name}.gme"
 
-        self.gui_module.install_title = fake_install_title
-        self.gui_module.pen_summary = lambda pen, catalog: PenSummary(
+        self.services.install_title = fake_install_title
+        self.services.pen_summary = lambda pen, catalog: PenSummary(
             pen=pen, free=2048, total=4096, installed=(f"{expected_product.name}.gme",), outdated=[]
         )
 
@@ -895,8 +942,8 @@ class PenPanelTests(unittest.TestCase):
         self.assertEqual(len(recorded), 1)
         self.assertEqual(recorded[0][0], fake_pen)
         self.assertEqual(recorded[0][1], expected_product)
-        self.assertEqual(self.window._installed_list.count(), 1)
-        self.assertEqual(self.window._installed_list.item(0).text(), f"{expected_product.name}.gme")
+        self.assertEqual(self.window._pen_panel.installed_list.count(), 1)
+        self.assertEqual(self.window._pen_panel.installed_list.item(0).text(), f"{expected_product.name}.gme")
 
     def test_task_callbacks_run_on_gui_thread_even_when_lambdas(self) -> None:
         # Regression: a lambda on_success ran in the worker thread and segfaulted in libQt6Gui.
@@ -924,10 +971,10 @@ class PenPanelTests(unittest.TestCase):
         def counting_find_pen(**kwargs):
             nonlocal call_count
             call_count += 1
-            return Pen(mountpoint=Path("/media/tiptoi"), source="")
+            return Pen(mountpoint=Path("/media/tiptoi"), source=None)
 
-        self.gui_module.find_pen = counting_find_pen
-        self.gui_module.pen_summary = lambda pen, catalog: PenSummary(
+        self.services.find_pen = counting_find_pen
+        self.services.pen_summary = lambda pen, catalog: PenSummary(
             pen=pen, free=0, total=0, installed=(), outdated=[]
         )
 
@@ -938,8 +985,8 @@ class PenPanelTests(unittest.TestCase):
         self.assertEqual(call_count, 1)
 
     def test_no_thread_leak_after_repeated_tasks(self) -> None:
-        self.gui_module.find_pen = lambda **kwargs: Pen(mountpoint=Path("/media/tiptoi"), source="")
-        self.gui_module.pen_summary = lambda pen, catalog: PenSummary(
+        self.services.find_pen = lambda **kwargs: Pen(mountpoint=Path("/media/tiptoi"), source=None)
+        self.services.pen_summary = lambda pen, catalog: PenSummary(
             pen=pen, free=0, total=0, installed=(), outdated=[]
         )
 
@@ -959,24 +1006,24 @@ class PenPanelTests(unittest.TestCase):
     def test_poll_pen_clears_pen_when_no_longer_mounted(self) -> None:
         fake_pen = Pen(mountpoint=Path("/media/tiptoi"), source="/dev/sdb1")
 
-        self.gui_module.find_pen = lambda **kwargs: fake_pen
-        self.gui_module.pen_summary = lambda pen, catalog: PenSummary(
+        self.services.find_pen = lambda **kwargs: fake_pen
+        self.services.pen_summary = lambda pen, catalog: PenSummary(
             pen=pen, free=1024, total=4096, installed=("A.gme",), outdated=[]
         )
 
         self.window._detect()
         _pump_until_idle(self.app, self.window._pen_job)
         self.assertIsNotNone(self.window._pen)
-        self.assertEqual(self.window._installed_list.count(), 1)
+        self.assertEqual(self.window._pen_panel.installed_list.count(), 1)
 
-        self.gui_module.pen_still_mounted = lambda pen: False
+        self.services.pen_mount_alive = lambda pen: False
 
         with patch.object(self.gui_module.QMessageBox, "warning") as mock_warning:
             self.window._poll_pen()
 
         self.assertIsNone(self.window._pen)
         self.assertIs(self.window._connection, self.gui_module.ConnectionState.DISCONNECTED)
-        self.assertEqual(self.window._installed_list.count(), 0)
+        self.assertEqual(self.window._pen_panel.installed_list.count(), 0)
         self.assertEqual(self.window._connection_label.text(), "○ Not connected")
         self.assertEqual(self.window.statusBar().currentMessage(), "Pen disconnected")
         mock_warning.assert_not_called()
@@ -985,8 +1032,8 @@ class PenPanelTests(unittest.TestCase):
         def _raise(**kwargs):
             raise PenError("boom")
 
-        self.gui_module.find_pen = _raise
-        self.gui_module.pen_device_present = lambda: True
+        self.services.find_pen = _raise
+        self.services.device_plugged_in = lambda: True
 
         with patch.object(self.gui_module.QMessageBox, "warning") as mock_warning:
             self.window._poll_pen()
@@ -1008,8 +1055,8 @@ class PenPanelTests(unittest.TestCase):
             call_count += 1
             return Pen(mountpoint=Path("/media/tiptoi"), source="/dev/sdb1")
 
-        self.gui_module.find_pen = counting_find_pen
-        self.gui_module.pen_device_present = lambda: True
+        self.services.find_pen = counting_find_pen
+        self.services.device_plugged_in = lambda: True
 
         self.window._pen_job._thread = object()
         try:
@@ -1021,20 +1068,18 @@ class PenPanelTests(unittest.TestCase):
 
     def test_poll_pen_does_not_clear_override_pen_when_device_absent(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
-            fake_pen = Pen(mountpoint=Path(tmp_dir), source="")
-            self.window._pen = fake_pen
-            self.window._connection = self.gui_module.ConnectionState.CONNECTED
-            self.gui_module.pen_device_present = lambda: False
+            fake_pen = Pen(mountpoint=Path(tmp_dir), source=None)
+            self.window._connection = self.gui_module.Connected(fake_pen)
+            self.services.device_plugged_in = lambda: False
             # WHY: override pens have no by-label device to key off - pen_still_mounted() falls back
             # to Path.is_dir(), which the real implementation (not the setUp default) exercises here
-            self.gui_module.pen_still_mounted = self._original_pen_still_mounted
-
+    
             self.window._poll_pen()
 
             self.assertIs(self.window._pen, fake_pen)
 
     def test_poll_device_absent_and_not_connected_sets_disconnected(self) -> None:
-        self.gui_module.pen_device_present = lambda: False
+        self.services.device_plugged_in = lambda: False
         self.window._connection = self.gui_module.ConnectionState.PLUGGED_IN_UNMOUNTED
 
         self.window._poll_pen()
@@ -1046,8 +1091,8 @@ class PenPanelTests(unittest.TestCase):
         def _raise(**kwargs):
             raise PenError("boom")
 
-        self.gui_module.find_pen = _raise
-        self.gui_module.pen_device_present = lambda: True
+        self.services.find_pen = _raise
+        self.services.device_plugged_in = lambda: True
 
         with patch.object(self.gui_module.QMessageBox, "warning") as mock_warning:
             self.window._detect()
@@ -1060,8 +1105,8 @@ class PenPanelTests(unittest.TestCase):
         def _raise(**kwargs):
             raise PenError("boom")
 
-        self.gui_module.find_pen = _raise
-        self.gui_module.pen_device_present = lambda: False
+        self.services.find_pen = _raise
+        self.services.device_plugged_in = lambda: False
 
         with patch.object(self.gui_module.QMessageBox, "warning") as mock_warning:
             self.window._detect()
@@ -1074,8 +1119,8 @@ class PenPanelTests(unittest.TestCase):
         def _raise(**kwargs):
             raise PenError("boom")
 
-        self.gui_module.find_pen = _raise
-        self.gui_module.pen_device_present = lambda: True
+        self.services.find_pen = _raise
+        self.services.device_plugged_in = lambda: True
 
         with patch.object(self.gui_module.QMessageBox, "warning") as mock_warning:
             self.window._detect(quiet=True)
@@ -1086,20 +1131,20 @@ class PenPanelTests(unittest.TestCase):
         self.assertIn("boom", self.window.statusBar().currentMessage())
 
     def test_mount_button_enabled_only_with_device_present_no_pen_no_task(self) -> None:
-        self.gui_module.pen_device_present = lambda: False
-        self.window._pen = None
+        self.services.device_plugged_in = lambda: False
+        self.window._connection = self.gui_module.ConnectionState.DISCONNECTED
         self.window._update_action_buttons_enabled()
         self.assertFalse(self.window._mount_button.isEnabled())
 
-        self.gui_module.pen_device_present = lambda: True
+        self.services.device_plugged_in = lambda: True
         self.window._update_action_buttons_enabled()
         self.assertTrue(self.window._mount_button.isEnabled())
 
-        self.window._pen = Pen(mountpoint=Path("/media/tiptoi"), source="/dev/sdb1")
+        self.window._connection = self.gui_module.Connected(Pen(mountpoint=Path("/media/tiptoi"), source="/dev/sdb1"))
         self.window._update_action_buttons_enabled()
         self.assertFalse(self.window._mount_button.isEnabled())
 
-        self.window._pen = None
+        self.window._connection = self.gui_module.ConnectionState.DISCONNECTED
         self.window._pen_job._thread = object()
         try:
             self.window._update_action_buttons_enabled()
@@ -1108,15 +1153,15 @@ class PenPanelTests(unittest.TestCase):
             self.window._pen_job._thread = None
 
     def test_unmount_button_enabled_only_with_detected_pen_no_task(self) -> None:
-        self.window._pen = None
+        self.window._connection = self.gui_module.ConnectionState.DISCONNECTED
         self.window._update_action_buttons_enabled()
         self.assertFalse(self.window._unmount_button.isEnabled())
 
-        self.window._pen = Pen(mountpoint=Path("/some/folder"), source="")
+        self.window._connection = self.gui_module.Connected(Pen(mountpoint=Path("/some/folder"), source=None))
         self.window._update_action_buttons_enabled()
         self.assertFalse(self.window._unmount_button.isEnabled())
 
-        self.window._pen = Pen(mountpoint=Path("/media/tiptoi"), source="/dev/sdb1")
+        self.window._connection = self.gui_module.Connected(Pen(mountpoint=Path("/media/tiptoi"), source="/dev/sdb1"))
         self.window._update_action_buttons_enabled()
         self.assertTrue(self.window._unmount_button.isEnabled())
 
@@ -1130,8 +1175,8 @@ class PenPanelTests(unittest.TestCase):
     def test_successful_mount_populates_pen_panel(self) -> None:
         fake_pen = Pen(mountpoint=Path("/media/tiptoi"), source="/dev/sdc1")
 
-        self.gui_module.mount_pen = lambda: fake_pen
-        self.gui_module.pen_summary = lambda pen, catalog: PenSummary(
+        self.services.mount_pen = lambda: fake_pen
+        self.services.pen_summary = lambda pen, catalog: PenSummary(
             pen=pen, free=1024, total=4096, installed=("A.gme",), outdated=[]
         )
 
@@ -1139,65 +1184,63 @@ class PenPanelTests(unittest.TestCase):
         _pump_until_idle(self.app, self.window._pen_job)
 
         self.assertEqual(self.window._pen, fake_pen)
-        self.assertIs(self.window._connection, self.gui_module.ConnectionState.CONNECTED)
+        self.assertIsInstance(self.window._connection, self.gui_module.Connected)
         self.assertEqual(
-            [self.window._installed_list.item(i).text() for i in range(self.window._installed_list.count())],
+            [self.window._pen_panel.installed_list.item(i).text() for i in range(self.window._pen_panel.installed_list.count())],
             ["A.gme"],
         )
         self.assertIn("Pen mounted", self.window.statusBar().currentMessage())
 
     def test_successful_unmount_clears_pen_and_blocks_poll_until_replug(self) -> None:
         fake_pen = Pen(mountpoint=Path("/media/tiptoi"), source="/dev/sdb1")
-        self.window._pen = fake_pen
-        self.window._connection = self.gui_module.ConnectionState.CONNECTED
-        self.window._installed_list.addItem("A.gme")
-        self.window._installed_names = ("A.gme",)
+        self.window._connection = self.gui_module.Connected(fake_pen)
+        self.window._pen_panel.installed_list.addItem("A.gme")
+        self.window._pen_panel._installed_names = ("A.gme",)
 
-        self.gui_module.unmount_pen = lambda pen: None
+        self.services.unmount_pen = lambda pen: None
 
         self.window._start_unmount()
         _pump_until_idle(self.app, self.window._pen_job)
 
         self.assertIsNone(self.window._pen)
-        self.assertEqual(self.window._installed_list.count(), 0)
+        self.assertEqual(self.window._pen_panel.installed_list.count(), 0)
         self.assertIn("safe to unplug", self.window._connection_label.text())
         self.assertIn("safe to unplug", self.window.statusBar().currentMessage())
         self.assertIs(self.window._connection, self.gui_module.ConnectionState.SAFELY_UNMOUNTED)
 
         # WHY: the device is still plugged in (present) but was deliberately unmounted - a quiet
         # poll must not remount it
-        self.gui_module.pen_device_present = lambda: True
-        with patch.object(self.gui_module, "find_pen") as mock_find_pen:
+        self.services.device_plugged_in = lambda: True
+        with patch.object(self.services, "find_pen") as mock_find_pen:
             self.window._poll_pen()
         mock_find_pen.assert_not_called()
         self.assertIsNone(self.window._pen)
 
         # unplugging (device disappears) clears the guard
-        self.gui_module.pen_device_present = lambda: False
+        self.services.device_plugged_in = lambda: False
         self.window._poll_pen()
         self.assertIs(self.window._connection, self.gui_module.ConnectionState.DISCONNECTED)
 
         # replugging (device reappears) lets auto-detect run again
-        self.gui_module.pen_device_present = lambda: True
-        self.gui_module.find_pen = lambda **kwargs: fake_pen
-        self.gui_module.pen_summary = lambda pen, catalog: PenSummary(
+        self.services.device_plugged_in = lambda: True
+        self.services.find_pen = lambda **kwargs: fake_pen
+        self.services.pen_summary = lambda pen, catalog: PenSummary(
             pen=pen, free=0, total=0, installed=(), outdated=[]
         )
         self.window._poll_pen()
         _pump_until_idle(self.app, self.window._pen_job)
 
         self.assertEqual(self.window._pen, fake_pen)
-        self.assertIs(self.window._connection, self.gui_module.ConnectionState.CONNECTED)
+        self.assertIsInstance(self.window._connection, self.gui_module.Connected)
 
     def test_unmount_failure_shows_message_box_and_keeps_pen(self) -> None:
         fake_pen = Pen(mountpoint=Path("/media/tiptoi"), source="/dev/sdb1")
-        self.window._pen = fake_pen
-        self.window._connection = self.gui_module.ConnectionState.CONNECTED
+        self.window._connection = self.gui_module.Connected(fake_pen)
 
         def _raise(pen):
             raise PenError("target is busy")
 
-        self.gui_module.unmount_pen = _raise
+        self.services.unmount_pen = _raise
 
         with patch.object(self.gui_module.QMessageBox, "warning") as mock_warning:
             self.window._start_unmount()
@@ -1220,35 +1263,35 @@ class PenPanelTests(unittest.TestCase):
             )
             return PenSummary(pen=pen, free=0, total=0, installed=(), outdated=outdated)
 
-        self.gui_module.find_pen = lambda **kwargs: fake_pen
-        self.gui_module.pen_summary = fake_pen_summary
+        self.services.find_pen = lambda **kwargs: fake_pen
+        self.services.pen_summary = fake_pen_summary
 
         self.window._catalog = None  # WHY: simulates detect winning the race against the catalog load
         self.window._detect()
         _pump_until_idle(self.app, self.window._pen_job)
 
-        self.assertIs(self.window._connection, self.gui_module.ConnectionState.CONNECTED)
-        self.assertEqual(self.window._outdated_list.count(), 0)
+        self.assertIsInstance(self.window._connection, self.gui_module.Connected)
+        self.assertEqual(self.window._pen_panel.outdated_list.count(), 0)
 
-        self.window._on_loaded((self.catalog, False))
+        self.window._on_loaded(LoadedCatalog(self.catalog))
         _pump_until_idle(self.app, self.window._pen_job)
 
-        self.assertEqual(self.window._outdated_list.count(), 1)
+        self.assertEqual(self.window._pen_panel.outdated_list.count(), 1)
 
     def test_on_loaded_defers_pen_summary_refresh_while_pen_job_running(self) -> None:
         fake_pen = Pen(mountpoint=Path("/media/tiptoi"), source="/dev/sdb1")
-        self.gui_module.find_pen = lambda **kwargs: fake_pen
-        self.gui_module.pen_summary = lambda pen, catalog: PenSummary(
+        self.services.find_pen = lambda **kwargs: fake_pen
+        self.services.pen_summary = lambda pen, catalog: PenSummary(
             pen=pen, free=0, total=0, installed=(), outdated=[]
         )
 
         self.window._detect()
         _pump_until_idle(self.app, self.window._pen_job)
-        self.assertIs(self.window._connection, self.gui_module.ConnectionState.CONNECTED)
+        self.assertIsInstance(self.window._connection, self.gui_module.Connected)
 
         self.window._pen_job._thread = object()
         try:
-            self.window._on_loaded((self.catalog, False))
+            self.window._on_loaded(LoadedCatalog(self.catalog))
             self.assertTrue(self.window._summary_refresh_pending)
         finally:
             self.window._pen_job._thread = None
@@ -1276,33 +1319,33 @@ class PenPanelTests(unittest.TestCase):
             seen_catalogs.append(catalog)
             return PenSummary(pen=pen, free=0, total=0, installed=(), outdated=[])
 
-        self.gui_module.find_pen = blocking_find_pen
-        self.gui_module.pen_summary = recording_pen_summary
+        self.services.find_pen = blocking_find_pen
+        self.services.pen_summary = recording_pen_summary
 
         self.window._catalog = None  # WHY: mirrors startup, where the detect starts before the load
         self.window._detect()
         self.assertTrue(self.window._pen_job.is_running)
-        self.assertIsNot(self.window._connection, self.gui_module.ConnectionState.CONNECTED)
+        self.assertNotIsInstance(self.window._connection, self.gui_module.Connected)
 
-        self.window._on_loaded((self.catalog, False))
+        self.window._on_loaded(LoadedCatalog(self.catalog))
         self.assertTrue(self.window._summary_refresh_pending)
 
         release.set()
         _pump_until_idle(self.app, self.window._pen_job)
 
-        self.assertIs(self.window._connection, self.gui_module.ConnectionState.CONNECTED)
+        self.assertIsInstance(self.window._connection, self.gui_module.Connected)
         self.assertIs(seen_catalogs[-1], self.catalog)
 
     def test_mount_failure_after_unmount_clears_safely_unmounted_state(self) -> None:
         fake_pen = Pen(mountpoint=Path("/media/tiptoi"), source="/dev/sdb1")
-        self.window._pen = fake_pen
+        self.window._connection = self.gui_module.Connected(fake_pen)
         self.window._connection = self.gui_module.ConnectionState.SAFELY_UNMOUNTED
 
         def _raise():
             raise PenError("mount failed")
 
-        self.gui_module.mount_pen = _raise
-        self.gui_module.pen_device_present = lambda: True
+        self.services.mount_pen = _raise
+        self.services.device_plugged_in = lambda: True
 
         with patch.object(self.gui_module.QMessageBox, "warning") as mock_warning:
             self.window._start_mount()
@@ -1313,22 +1356,22 @@ class PenPanelTests(unittest.TestCase):
         self.assertIs(self.window._connection, self.gui_module.ConnectionState.PLUGGED_IN_UNMOUNTED)
 
         # a subsequent poll with the device mounted resumes detection instead of staying stuck
-        self.gui_module.find_pen = lambda **kwargs: fake_pen
-        self.gui_module.pen_summary = lambda pen, catalog: PenSummary(
+        self.services.find_pen = lambda **kwargs: fake_pen
+        self.services.pen_summary = lambda pen, catalog: PenSummary(
             pen=pen, free=0, total=0, installed=(), outdated=[]
         )
-        with patch.object(self.gui_module, "pen_device_mounted", return_value=True):
+        with patch.object(self.services, "device_mounted", return_value=True):
             self.window._poll_pen()
             _pump_until_idle(self.app, self.window._pen_job)
 
-        self.assertIs(self.window._connection, self.gui_module.ConnectionState.CONNECTED)
+        self.assertIsInstance(self.window._connection, self.gui_module.Connected)
 
     def test_poll_pen_plugged_in_unmounted_skips_detect_when_not_mounted(self) -> None:
         self.window._connection = self.gui_module.ConnectionState.PLUGGED_IN_UNMOUNTED
-        self.gui_module.pen_device_present = lambda: True
+        self.services.device_plugged_in = lambda: True
 
-        with patch.object(self.gui_module, "pen_device_mounted", return_value=False):
-            with patch.object(self.gui_module, "find_pen") as mock_find_pen:
+        with patch.object(self.services, "device_mounted", return_value=False):
+            with patch.object(self.services, "find_pen") as mock_find_pen:
                 self.window._poll_pen()
 
         mock_find_pen.assert_not_called()
@@ -1336,17 +1379,68 @@ class PenPanelTests(unittest.TestCase):
     def test_poll_pen_plugged_in_unmounted_detects_when_mounted(self) -> None:
         fake_pen = Pen(mountpoint=Path("/media/tiptoi"), source="/dev/sdb1")
         self.window._connection = self.gui_module.ConnectionState.PLUGGED_IN_UNMOUNTED
-        self.gui_module.pen_device_present = lambda: True
-        self.gui_module.find_pen = lambda **kwargs: fake_pen
-        self.gui_module.pen_summary = lambda pen, catalog: PenSummary(
+        self.services.device_plugged_in = lambda: True
+        self.services.find_pen = lambda **kwargs: fake_pen
+        self.services.pen_summary = lambda pen, catalog: PenSummary(
             pen=pen, free=0, total=0, installed=(), outdated=[]
         )
 
-        with patch.object(self.gui_module, "pen_device_mounted", return_value=True):
+        with patch.object(self.services, "device_mounted", return_value=True):
             self.window._poll_pen()
             _pump_until_idle(self.app, self.window._pen_job)
 
-        self.assertIs(self.window._connection, self.gui_module.ConnectionState.CONNECTED)
+        self.assertIsInstance(self.window._connection, self.gui_module.Connected)
+
+
+class NextPollActionTests(unittest.TestCase):
+    """The poll decision is plain Python - no QApplication needed."""
+
+    def setUp(self) -> None:
+        import tiptoi_linux.gui as gui_module
+
+        self.gui = gui_module
+        self.pen = Pen(mountpoint=Path("/media/tiptoi"), source="/dev/sdb1")
+
+    def _decide(self, connection, *, job_running=False, plugged=False, mounted=False, alive=True):
+        def forbid(name):
+            def probe(*args):
+                raise AssertionError(f"{name} must not be probed here")
+            return probe
+
+        return self.gui.next_poll_action(
+            connection,
+            job_running=job_running,
+            device_plugged_in=(lambda: plugged) if plugged is not None else forbid("device_plugged_in"),
+            device_mounted=(lambda: mounted) if mounted is not None else forbid("device_mounted"),
+            pen_mount_alive=(lambda pen: alive) if alive is not None else forbid("pen_mount_alive"),
+        )
+
+    def test_decisions(self) -> None:
+        State = self.gui.ConnectionState
+        Action = self.gui.PollAction
+        connected = self.gui.Connected(self.pen)
+        cases = [
+            # (connection, job_running, plugged, mounted, alive) -> action
+            ((connected, True, None, None, None), Action.NOTHING),
+            ((connected, False, None, None, True), Action.NOTHING),
+            ((connected, False, None, None, False), Action.PEN_LOST),
+            ((State.DISCONNECTED, False, False, None, None), Action.NOTHING),
+            ((State.PLUGGED_IN_UNMOUNTED, False, False, None, None), Action.DEVICE_GONE),
+            ((State.SAFELY_UNMOUNTED, False, False, None, None), Action.DEVICE_GONE),
+            ((State.SAFELY_UNMOUNTED, False, True, None, None), Action.NOTHING),
+            ((State.PLUGGED_IN_UNMOUNTED, False, True, False, None), Action.NOTHING),
+            ((State.PLUGGED_IN_UNMOUNTED, False, True, True, None), Action.DETECT),
+            ((State.DISCONNECTED, False, True, None, None), Action.DETECT),
+        ]
+        for (connection, job_running, plugged, mounted, alive), expected in cases:
+            with self.subTest(connection=connection, plugged=plugged, mounted=mounted, alive=alive):
+                self.assertIs(
+                    self._decide(connection, job_running=job_running, plugged=plugged, mounted=mounted, alive=alive),
+                    expected,
+                )
+
+    def test_every_phase_has_status_text(self) -> None:
+        self.assertEqual(set(self.gui._PHASE_STATUS_TEXT), set(Phase))
 
 
 if __name__ == "__main__":

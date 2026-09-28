@@ -79,7 +79,7 @@ if [ "${#missing_libs[@]}" -gt 0 ]; then
     fi
 fi
 
-# WHY: enforces the recorded decision (PLANS.md) to bundle the xcb platform plugin only - without
+# WHY: the build bundles only the xcb platform plugin (XWayland covers Wayland sessions) - without
 # this, Qt on a Wayland session auto-picks the bundled libqwayland.so, whose shell-integration
 # plugins the trim step deletes, and it aborts instead of falling back to XWayland.
 export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-xcb}"

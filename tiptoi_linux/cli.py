@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import functools
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from pathlib import Path
 
 from tiptoi_linux.catalog import Catalog, Product, cache_path, load_catalog
@@ -12,19 +13,18 @@ from tiptoi_linux.download import download_product
 from tiptoi_linux.errors import TiptoiError
 from tiptoi_linux.i18n import _, ngettext
 from tiptoi_linux.pen import (
-    PHASE_COPY,
-    PHASE_DOWNLOAD,
-    PHASE_VERIFY,
+    Phase,
     PhaseProgress,
     delete_title,
-    disk_space,
     find_pen,
     install_title,
     installed_gme_files,
     mount_pen,
     outdated_titles,
+    pen_summary,
     unmount_pen,
 )
+from tiptoi_linux.streams import Progress, percent
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -108,8 +108,24 @@ def _print_products(products: Sequence[Product]) -> None:
         print(f"{product.name:<{width}}  {product.version}")
 
 
+def _print_error(message: str) -> None:
+    print(_("error: {message}").format(message=message), file=sys.stderr)
+
+
+def _load_catalog() -> Catalog:
+    loaded = load_catalog()
+    if loaded.stale_reason is not None:
+        print(
+            _("warning: {error} - using stale cached catalog at {path}").format(
+                error=loaded.stale_reason, path=cache_path()
+            ),
+            file=sys.stderr,
+        )
+    return loaded.catalog
+
+
 def _cmd_update(args: argparse.Namespace) -> int:
-    catalog = load_catalog(force=True, allow_stale=False)
+    catalog = load_catalog(force=True, allow_stale=False).catalog
     n = len(catalog.products)
     print(
         ngettext("Catalog updated: {n} product", "Catalog updated: {n} products", n).format(n=n)
@@ -119,19 +135,16 @@ def _cmd_update(args: argparse.Namespace) -> int:
 
 
 def _cmd_list(args: argparse.Namespace) -> int:
-    catalog = load_catalog()
+    catalog = _load_catalog()
     if not catalog.products:
-        print(
-            _("error: {message}").format(message=_("catalog is empty - run 'tiptoi update'")),
-            file=sys.stderr,
-        )
+        _print_error(_("catalog is empty - run 'tiptoi update'"))
         return 1
     _print_products(catalog.products)
     return 0
 
 
 def _cmd_search(args: argparse.Namespace) -> int:
-    catalog = load_catalog()
+    catalog = _load_catalog()
     matches = catalog.search(args.term)
     if not matches:
         print(_("No products matching {term!r}").format(term=args.term), file=sys.stderr)
@@ -149,27 +162,17 @@ def _human_size(num_bytes: int) -> str:
     return f"{size:.1f} TiB"
 
 
-def _make_progress() -> Callable[[int, int | None], None] | None:
-    if not sys.stderr.isatty():
-        # WHY: piped/redirected output (logs, CI) must stay clean, with no \r percentage spam
-        return None
-
-    def _progress(done: int, total: int | None) -> None:
-        if total:
-            percent = min(100, int(done * 100 / total))
-            print(f"\r{percent}%", end="", file=sys.stderr, flush=True)
-        else:
-            text = _("{n} bytes").format(n=done)
-            print(f"\r{text}", end="", file=sys.stderr, flush=True)
-
-    return _progress
-
-
-_PHASE_LABELS = {
-    PHASE_DOWNLOAD: _("Downloading"),
-    PHASE_COPY: _("Copying to pen"),
-    PHASE_VERIFY: _("Verifying on pen"),
+PHASE_LABELS = {
+    Phase.DOWNLOAD: _("Downloading"),
+    Phase.COPY: _("Copying to pen"),
+    Phase.VERIFY: _("Verifying on pen"),
 }
+
+
+def _progress_text(done: int, total: int | None) -> str:
+    if total:
+        return f"{percent(done, total)}%"
+    return _("{n} bytes").format(n=done)
 
 
 def _make_phase_progress() -> PhaseProgress | None:
@@ -177,23 +180,22 @@ def _make_phase_progress() -> PhaseProgress | None:
         # WHY: piped/redirected output (logs, CI) must stay clean, with no \r percentage spam
         return None
 
-    state: dict[str, str | None] = {"phase": None}
+    state: dict[str, Phase | None] = {"phase": None}
 
-    def _progress(phase: str, done: int, total: int | None) -> None:
+    def _progress(phase: Phase, done: int, total: int | None) -> None:
         if state["phase"] is not None and state["phase"] != phase:
             # WHY: keep each phase's throttled \r updates on their own line instead of overwriting
             # the previous phase's last line
             print(file=sys.stderr)
         state["phase"] = phase
-        label = _PHASE_LABELS.get(phase, phase)
-        if total:
-            percent = min(100, int(done * 100 / total))
-            print(f"\r{label} {percent}%", end="", file=sys.stderr, flush=True)
-        else:
-            text = _("{n} bytes").format(n=done)
-            print(f"\r{label} {text}", end="", file=sys.stderr, flush=True)
+        print(f"\r{PHASE_LABELS[phase]} {_progress_text(done, total)}", end="", file=sys.stderr, flush=True)
 
     return _progress
+
+
+def _make_download_progress() -> Progress | None:
+    phase_progress = _make_phase_progress()
+    return None if phase_progress is None else functools.partial(phase_progress, Phase.DOWNLOAD)
 
 
 def _require_product(catalog: Catalog, name: str) -> Product:
@@ -204,10 +206,10 @@ def _require_product(catalog: Catalog, name: str) -> Product:
 
 
 def _cmd_download(args: argparse.Namespace) -> int:
-    catalog = load_catalog()
+    catalog = _load_catalog()
     product = _require_product(catalog, args.name)
 
-    progress = _make_progress()
+    progress = _make_download_progress()
     try:
         path = download_product(product, progress=progress)
     finally:
@@ -218,16 +220,18 @@ def _cmd_download(args: argparse.Namespace) -> int:
 
 
 def _cmd_pen_status(args: argparse.Namespace) -> int:
-    pen = find_pen(override=args.pen_path)
-    print(_("Mountpoint: {path}").format(path=pen.mountpoint))
-    free, total = disk_space(pen)
-    print(_("Free space: {free} of {total}").format(free=_human_size(free), total=_human_size(total)))
-    files = installed_gme_files(pen)
-    if not files:
+    summary = pen_summary(find_pen(override=args.pen_path), None)
+    print(_("Mountpoint: {path}").format(path=summary.pen.mountpoint))
+    print(
+        _("Free space: {free} of {total}").format(
+            free=_human_size(summary.free), total=_human_size(summary.total)
+        )
+    )
+    if not summary.installed:
         print(_("Installed titles: none"))
         return 0
-    print(_("Installed titles ({n}):").format(n=len(files)))
-    for name in files:
+    print(_("Installed titles ({n}):").format(n=len(summary.installed)))
+    for name in summary.installed:
         print(f"  {name}")
     return 0
 
@@ -246,7 +250,7 @@ def _cmd_pen_unmount(args: argparse.Namespace) -> int:
 
 
 def _cmd_pen_install(args: argparse.Namespace) -> int:
-    catalog = load_catalog()
+    catalog = _load_catalog()
     product = _require_product(catalog, args.name)
 
     pen = find_pen(override=args.pen_path)
@@ -287,22 +291,12 @@ def _cmd_pen_delete(args: argparse.Namespace) -> int:
             resolved.append(actual)
 
     if unknown:
-        print(
-            _("error: {message}").format(
-                message=_("not installed on the pen: {names}").format(names=", ".join(unknown))
-            ),
-            file=sys.stderr,
-        )
+        _print_error(_("not installed on the pen: {names}").format(names=", ".join(unknown)))
         return 1
 
     if not args.yes:
         if not sys.stdin.isatty():
-            print(
-                _("error: {message}").format(
-                    message=_("refusing to delete without confirmation; pass --yes")
-                ),
-                file=sys.stderr,
-            )
+            _print_error(_("refusing to delete without confirmation; pass --yes"))
             return 1
         print(_("Titles to delete ({n}):").format(n=len(resolved)))
         for name in resolved:
@@ -329,7 +323,7 @@ def _cmd_pen_delete(args: argparse.Namespace) -> int:
 
 def _cmd_pen_outdated(args: argparse.Namespace) -> int:
     pen = find_pen(override=args.pen_path)
-    catalog = load_catalog()
+    catalog = _load_catalog()
     titles = outdated_titles(pen, catalog)
     if not titles:
         print(_("All installed titles are up to date"))
@@ -345,8 +339,10 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         return args.func(args)
-    except TiptoiError as exc:
-        print(_("error: {message}").format(message=exc), file=sys.stderr)
+    except (TiptoiError, OSError) as exc:
+        # WHY: OSError as a backstop - an unwrapped filesystem failure (e.g. the pen unplugged
+        # mid-operation) should read as an error message, not a traceback
+        _print_error(str(exc))
         return 1
 
 

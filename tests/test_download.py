@@ -8,9 +8,15 @@ import urllib.error
 from pathlib import Path
 from unittest.mock import patch
 
-from tiptoi_linux import common
-from tiptoi_linux.catalog import Product
-from tiptoi_linux.download import DownloadError, download_product, gme_cache_dir, gme_file_name
+from tiptoi_linux import net, streams
+from tiptoi_linux.catalog import CatalogError, Product, gme_file_name
+from tiptoi_linux.download import (
+    DownloadError,
+    _parse_content_range,
+    _encode_url,
+    download_product,
+    gme_cache_dir,
+)
 
 
 def _product(
@@ -18,7 +24,7 @@ def _product(
     url: str = "https://cdn.example.com/Test%20Title.gme",
     version: str = "1",
 ) -> Product:
-    return Product(series_id="1", version=version, url=url, name=name)
+    return Product(version=version, url=url, name=name)
 
 
 class FakeResponse:
@@ -57,17 +63,17 @@ class GmeFileNameTests(unittest.TestCase):
         self.assertEqual(gme_file_name(_product(name="Foo Bar")), "Foo Bar.gme")
 
     def test_rejects_traversal_name(self) -> None:
-        with self.assertRaises(DownloadError):
+        with self.assertRaises(CatalogError):
             gme_file_name(_product(name="../../evil"))
 
     def test_rejects_embedded_separator_name(self) -> None:
-        with self.assertRaises(DownloadError):
+        with self.assertRaises(CatalogError):
             gme_file_name(_product(name="a/b"))
 
     def test_rejects_dot_and_dotdot(self) -> None:
         for bad_name in (".", ".."):
             with self.subTest(bad_name=bad_name):
-                with self.assertRaises(DownloadError):
+                with self.assertRaises(CatalogError):
                     gme_file_name(_product(name=bad_name))
 
 
@@ -106,7 +112,7 @@ class ResumeTests(unittest.TestCase):
                 captured_requests.append(request)
                 return fake_response
 
-            with patch.object(common.https_opener, "open", side_effect=fake_open):
+            with patch.object(net.https_opener, "open", side_effect=fake_open):
                 result = download_product(product, cache_dir=cache_dir)
 
             self.assertEqual(len(captured_requests), 1)
@@ -128,7 +134,7 @@ class VersionKeyedCacheTests(unittest.TestCase):
             body = b"new bytes"
             fake_response = FakeResponse(body, status=200, content_length=len(body))
 
-            with patch.object(common.https_opener, "open", return_value=fake_response):
+            with patch.object(net.https_opener, "open", return_value=fake_response):
                 result = download_product(v2_product, cache_dir=cache_dir)
 
             self.assertEqual(result, cache_dir / "2" / "Test Title.gme")
@@ -148,7 +154,7 @@ class NoOpRerunTests(unittest.TestCase):
             target.write_bytes(b"already here")
 
             with patch.object(
-                common.https_opener,
+                net.https_opener,
                 "open",
                 side_effect=AssertionError("opener.open must not be called for an existing target"),
             ):
@@ -171,7 +177,7 @@ class RangeIgnoredTests(unittest.TestCase):
             full_body = b"FRESH FULL CONTENT"
             fake_response = FakeResponse(full_body, status=200, content_length=len(full_body))
 
-            with patch.object(common.https_opener, "open", return_value=fake_response):
+            with patch.object(net.https_opener, "open", return_value=fake_response):
                 result = download_product(product, cache_dir=cache_dir)
 
             self.assertEqual(result.read_bytes(), full_body)
@@ -198,7 +204,7 @@ class MismatchedContentRangeTests(unittest.TestCase):
             def fake_open(request, timeout=None):  # noqa: ANN001
                 return responses.pop(0)
 
-            with patch.object(common.https_opener, "open", side_effect=fake_open):
+            with patch.object(net.https_opener, "open", side_effect=fake_open):
                 result = download_product(product, cache_dir=cache_dir)
 
             self.assertEqual(result.read_bytes(), b"HELLO")
@@ -223,7 +229,7 @@ class MissingContentRangeTests(unittest.TestCase):
             def fake_open(request, timeout=None):  # noqa: ANN001
                 return responses.pop(0)
 
-            with patch.object(common.https_opener, "open", side_effect=fake_open):
+            with patch.object(net.https_opener, "open", side_effect=fake_open):
                 result = download_product(product, cache_dir=cache_dir)
 
             self.assertEqual(result.read_bytes(), full_body)
@@ -250,7 +256,7 @@ class RangeNotSatisfiableTests(unittest.TestCase):
                     raise urllib.error.HTTPError(request.full_url, 416, "Range Not Satisfiable", {}, None)
                 return fresh_response
 
-            with patch.object(common.https_opener, "open", side_effect=fake_open):
+            with patch.object(net.https_opener, "open", side_effect=fake_open):
                 result = download_product(product, cache_dir=cache_dir)
 
             self.assertEqual(len(calls), 2)
@@ -265,14 +271,14 @@ class RangeNotSatisfiableTests(unittest.TestCase):
             def fake_open(request, timeout=None):  # noqa: ANN001
                 raise urllib.error.HTTPError(request.full_url, 404, "Not Found", {}, None)
 
-            with patch.object(common.https_opener, "open", side_effect=fake_open):
+            with patch.object(net.https_opener, "open", side_effect=fake_open):
                 with self.assertRaises(DownloadError):
                     download_product(product, cache_dir=cache_dir)
 
 
 class RedirectDowngradeTests(unittest.TestCase):
     def test_url_error_from_opener_raises_download_error(self) -> None:
-        # WHY: this is what common.HTTPSOnlyRedirectHandler raises on an https->http redirect -
+        # WHY: this is what net.HTTPSOnlyRedirectHandler raises on an https->http redirect -
         # verifies download_product wraps it into DownloadError via its existing except OSError
         product = _product()
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -281,7 +287,7 @@ class RedirectDowngradeTests(unittest.TestCase):
             def fake_open(request, timeout=None):  # noqa: ANN001
                 raise urllib.error.URLError("refusing to follow redirect to non-https URL: http://evil.example/x.gme")
 
-            with patch.object(common.https_opener, "open", side_effect=fake_open):
+            with patch.object(net.https_opener, "open", side_effect=fake_open):
                 with self.assertRaises(DownloadError):
                     download_product(product, cache_dir=cache_dir)
 
@@ -293,7 +299,7 @@ class MissingContentLengthTests(unittest.TestCase):
             cache_dir = Path(tmp_dir)
             fake_response = FakeResponse(b"whatever", status=200)  # no Content-Length
 
-            with patch.object(common.https_opener, "open", return_value=fake_response):
+            with patch.object(net.https_opener, "open", return_value=fake_response):
                 with self.assertRaises(DownloadError):
                     download_product(product, cache_dir=cache_dir)
 
@@ -313,7 +319,7 @@ class TextContentTypeTests(unittest.TestCase):
                 body, status=200, content_length=len(body), content_type="text/html; charset=utf-8"
             )
 
-            with patch.object(common.https_opener, "open", return_value=fake_response):
+            with patch.object(net.https_opener, "open", return_value=fake_response):
                 with self.assertRaises(DownloadError):
                     download_product(product, cache_dir=cache_dir)
 
@@ -335,7 +341,7 @@ class IncompleteReadTests(unittest.TestCase):
 
             fake_response = RaisingResponse(b"x" * 100, status=200, content_length=100)
 
-            with patch.object(common.https_opener, "open", return_value=fake_response):
+            with patch.object(net.https_opener, "open", return_value=fake_response):
                 with self.assertRaises(DownloadError):
                     download_product(product, cache_dir=cache_dir)
 
@@ -348,7 +354,7 @@ class SizeMismatchTests(unittest.TestCase):
             body = b"short"
             fake_response = FakeResponse(body, status=200, content_length=len(body) + 100)
 
-            with patch.object(common.https_opener, "open", return_value=fake_response):
+            with patch.object(net.https_opener, "open", return_value=fake_response):
                 with self.assertRaises(DownloadError):
                     download_product(product, cache_dir=cache_dir)
 
@@ -365,11 +371,11 @@ class FilenameTraversalTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             cache_dir = Path(tmp_dir)
             with patch.object(
-                common.https_opener,
+                net.https_opener,
                 "open",
                 side_effect=AssertionError("opener.open must not be called for an unsafe name"),
             ):
-                with self.assertRaises(DownloadError):
+                with self.assertRaises(CatalogError):
                     download_product(product, cache_dir=cache_dir)
             self.assertEqual(list(cache_dir.iterdir()), [])
 
@@ -378,11 +384,11 @@ class FilenameTraversalTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             cache_dir = Path(tmp_dir)
             with patch.object(
-                common.https_opener,
+                net.https_opener,
                 "open",
                 side_effect=AssertionError("opener.open must not be called for an unsafe name"),
             ):
-                with self.assertRaises(DownloadError):
+                with self.assertRaises(CatalogError):
                     download_product(product, cache_dir=cache_dir)
             self.assertEqual(list(cache_dir.iterdir()), [])
 
@@ -393,7 +399,7 @@ class UnsafeVersionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             cache_dir = Path(tmp_dir)
             with patch.object(
-                common.https_opener,
+                net.https_opener,
                 "open",
                 side_effect=AssertionError("opener.open must not be called for an unsafe version"),
             ):
@@ -423,7 +429,7 @@ class UrlEncodingTests(unittest.TestCase):
                 captured_requests.append(request)
                 return fake_response
 
-            with patch.object(common.https_opener, "open", side_effect=fake_open):
+            with patch.object(net.https_opener, "open", side_effect=fake_open):
                 download_product(product, cache_dir=cache_dir)
 
             requested_url = captured_requests[0].full_url
@@ -446,8 +452,8 @@ class ProgressThrottleTests(unittest.TestCase):
             # WHY: a tiny chunk size forces ~500 read() calls so an unthrottled implementation would
             # call progress ~500 times instead of ~101
             with (
-                patch.object(common, "CHUNK_BYTES", 100),
-                patch.object(common.https_opener, "open", return_value=fake_response),
+                patch.object(streams, "CHUNK_BYTES", 100),
+                patch.object(net.https_opener, "open", return_value=fake_response),
             ):
                 download_product(
                     product, cache_dir=cache_dir, progress=lambda done, total: calls.append((done, total))
@@ -456,6 +462,35 @@ class ProgressThrottleTests(unittest.TestCase):
             self.assertLessEqual(len(calls), 101)
             self.assertGreater(len(calls), 50)
             self.assertEqual(calls[-1][0], len(body))
+
+
+class ParseContentRangeTests(unittest.TestCase):
+    def test_cases(self) -> None:
+        cases = {
+            None: None,
+            "bytes 0-99/100": (0, 100),
+            "bytes 6-10/11": (6, 11),
+            " bytes 6-10/* ": (6, None),
+            "bytes 6-10": None,
+            "items 0-1/2": None,
+            "bytes a-b/c": None,
+        }
+        for value, expected in cases.items():
+            with self.subTest(value=value):
+                self.assertEqual(_parse_content_range(value), expected)
+
+
+class EncodeUrlTests(unittest.TestCase):
+    def test_cases(self) -> None:
+        cases = {
+            "https://x/a%20b.gme": "https://x/a%20b.gme",
+            "https://x/a b.gme": "https://x/a%20b.gme",
+            "https://x/ä.gme": "https://x/%C3%A4.gme",
+            "https://x/a.gme?q=1": "https://x/a.gme?q=1",
+        }
+        for url, expected in cases.items():
+            with self.subTest(url=url):
+                self.assertEqual(_encode_url(url), expected)
 
 
 if __name__ == "__main__":

@@ -6,16 +6,25 @@ import tempfile
 import unittest
 import urllib.error
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
-from tiptoi_linux import catalog, common
+from tiptoi_linux import catalog
 from tiptoi_linux.catalog import (
     CatalogError,
+    Product,
     cache_path,
     download_catalog,
+    gme_file_name,
+    is_safe_file_name,
     parse_catalog,
 )
-from tiptoi_linux.common import HTTPSOnlyRedirectHandler
+from tiptoi_linux.net import HTTPSOnlyRedirectHandler
+
+
+def _opener_returning(response: io.BytesIO) -> MagicMock:
+    opener = MagicMock()
+    opener.open.return_value.__enter__.return_value = response
+    return opener
 
 FIXTURE_CSV = (
     "CSV file version,Firmware version,Firmware checksum,Firmware download address\n"
@@ -58,8 +67,6 @@ class ParseCatalogTests(unittest.TestCase):
         self.assertNotIn("Ravensburger", names)
 
     def test_ota_bin_row_excluded(self) -> None:
-        series_ids = [product.series_id for product in self.catalog.products]
-        self.assertNotIn("0", series_ids)
         for product in self.catalog.products:
             self.assertTrue(product.url.lower().endswith(".gme"))
 
@@ -67,15 +74,11 @@ class ParseCatalogTests(unittest.TestCase):
         # parse_catalog(FIXTURE_CSV) in setUp already succeeded despite the "1,2,3" row;
         # confirm none of its fields leaked into a product.
         for product in self.catalog.products:
-            self.assertNotEqual(product.series_id, "1")
+            self.assertNotEqual(product.version, "2")
 
     def test_shared_series_id_both_kept(self) -> None:
-        matches = [p for p in self.catalog.products if p.series_id == "68"]
-        names = {p.name for p in matches}
-        self.assertEqual(
-            names,
-            {"WissenQuizzenFCBayernMuenchen", "WissenQuizzenTiere"},
-        )
+        names = {p.name for p in self.catalog.products}
+        self.assertLessEqual({"WissenQuizzenFCBayernMuenchen", "WissenQuizzenTiere"}, names)
 
     def test_percent_encoded_filename_kept_as_is(self) -> None:
         product = self.catalog.by_name("Adventskalender Mandelmann")
@@ -87,23 +90,13 @@ class ParseCatalogTests(unittest.TestCase):
         self.assertIsNotNone(product)
         self.assertTrue(product.url.endswith("Space%20Adventure.gme"))
 
-    def test_firmware_parsed_off_line_two(self) -> None:
-        self.assertIsNotNone(self.catalog.firmware)
-        self.assertEqual(self.catalog.firmware.version, "6GE027")
-        self.assertEqual(self.catalog.firmware.checksum, "1872396468")
-        self.assertEqual(
-            self.catalog.firmware.url,
-            "https://cdn.ravensburger.de/db/Firmware-Files/de/27/REV12/Update6E.upd",
-        )
-        self.assertEqual(self.catalog.csv_version, "26091403")
-
     def test_search_case_insensitive(self) -> None:
         matches = self.catalog.search("eisk")
         self.assertEqual([p.name for p in matches], ["Die Eiskoenigin"])
         matches_upper = self.catalog.search("EISK")
         self.assertEqual([p.name for p in matches_upper], ["Die Eiskoenigin"])
 
-    def test_missing_firmware_section_yields_none(self) -> None:
+    def test_missing_firmware_section_still_parses_products(self) -> None:
         short_csv = (
             "CSV file version,Firmware version,Firmware checksum,Firmware download address\n"
             "23,fw\n"
@@ -111,8 +104,6 @@ class ParseCatalogTests(unittest.TestCase):
             "1,1,https://cdn.ravensburger.de/db/applications/Foo.gme,Foo\n"
         )
         catalog_obj = parse_catalog(short_csv)
-        self.assertIsNone(catalog_obj.firmware)
-        self.assertEqual(catalog_obj.csv_version, "")
         self.assertEqual(len(catalog_obj.products), 1)
 
     def test_items_header_found_after_blank_line(self) -> None:
@@ -131,7 +122,6 @@ class ParseCatalogTests(unittest.TestCase):
         catalog_obj = parse_catalog(csv_with_blank)
         self.assertEqual(len(catalog_obj.products), 1)
         self.assertEqual(catalog_obj.products[0].name, "CREATE_Kreative_Bildergeschichten")
-        self.assertEqual(catalog_obj.csv_version, "26091403")
 
 
 class CachePathTests(unittest.TestCase):
@@ -161,20 +151,18 @@ class DownloadCatalogTests(unittest.TestCase):
             download_catalog("http://cdn.ravensburger.de/db/tiptoi.csv")
 
     def test_opener_url_error_raises_catalog_error(self) -> None:
-        # WHY: this is what common.HTTPSOnlyRedirectHandler raises on an https->http redirect -
+        # WHY: this is what net.HTTPSOnlyRedirectHandler raises on an https->http redirect -
         # verifies download_catalog wraps it into CatalogError via its existing except OSError
         # (URLError is an OSError subclass)
         with tempfile.TemporaryDirectory() as tmp_dir:
             cache = Path(tmp_dir) / "tiptoi.csv"
 
-            def fake_open(url, timeout=None):  # noqa: ANN001
-                raise urllib.error.URLError(
-                    "refusing to follow redirect to non-https URL: http://evil.example/tiptoi.csv"
-                )
-
-            with patch.object(common.https_opener, "open", side_effect=fake_open):
-                with self.assertRaises(CatalogError):
-                    download_catalog(cache=cache)
+            opener = MagicMock()
+            opener.open.side_effect = urllib.error.URLError(
+                "refusing to follow redirect to non-https URL: http://evil.example/tiptoi.csv"
+            )
+            with self.assertRaises(CatalogError):
+                download_catalog(cache=cache, opener=opener)
 
 
 class RedirectHandlerTests(unittest.TestCase):
@@ -190,10 +178,8 @@ class DownloadCatalogBehaviourTests(unittest.TestCase):
         fake_response = io.BytesIO(oversized)
         with tempfile.TemporaryDirectory() as tmp_dir:
             cache = Path(tmp_dir) / "tiptoi.csv"
-            with patch.object(common.https_opener, "open") as mock_open:
-                mock_open.return_value.__enter__.return_value = fake_response
-                with self.assertRaises(CatalogError):
-                    download_catalog(cache=cache)
+            with self.assertRaises(CatalogError):
+                download_catalog(cache=cache, opener=_opener_returning(fake_response))
 
     def test_zero_product_response_leaves_existing_cache_untouched(self) -> None:
         empty_csv = "CSV file version,Firmware version,Firmware checksum,Firmware download address\n"
@@ -202,10 +188,8 @@ class DownloadCatalogBehaviourTests(unittest.TestCase):
             cache = Path(tmp_dir) / "tiptoi.csv"
             cache.write_text(FIXTURE_CSV, encoding="latin-1")
 
-            with patch.object(common.https_opener, "open") as mock_open:
-                mock_open.return_value.__enter__.return_value = fake_response
-                with self.assertRaises(CatalogError):
-                    download_catalog(cache=cache)
+            with self.assertRaises(CatalogError):
+                download_catalog(cache=cache, opener=_opener_returning(fake_response))
 
             self.assertEqual(cache.read_text(encoding="latin-1"), FIXTURE_CSV)
 
@@ -218,9 +202,7 @@ class DownloadCatalogBehaviourTests(unittest.TestCase):
                 "cache_path",
                 side_effect=AssertionError("cache_path() must not be called when cache is injected"),
             ):
-                with patch.object(common.https_opener, "open") as mock_open:
-                    mock_open.return_value.__enter__.return_value = fake_response
-                    result = download_catalog(cache=injected_cache)
+                result = download_catalog(cache=injected_cache, opener=_opener_returning(fake_response))
 
             self.assertEqual(len(result.products), 6)
             self.assertEqual(injected_cache.read_text(encoding="latin-1"), FIXTURE_CSV)
@@ -241,7 +223,45 @@ class LoadCatalogFallbackTests(unittest.TestCase):
             cache.write_text(FIXTURE_CSV, encoding="latin-1")
             with patch.object(catalog, "download_catalog", side_effect=CatalogError("boom")):
                 result = catalog.load_catalog(cache=cache, allow_stale=True, force=True)
-            self.assertEqual(len(result.products), 6)
+            self.assertEqual(len(result.catalog.products), 6)
+            self.assertEqual(result.stale_reason, "boom")
+
+    def test_fresh_cache_is_not_stale(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cache = Path(tmp_dir) / "tiptoi.csv"
+            cache.write_text(FIXTURE_CSV, encoding="latin-1")
+            with patch.object(catalog, "download_catalog", side_effect=AssertionError("no network for a fresh cache")):
+                result = catalog.load_catalog(cache=cache)
+            self.assertEqual(len(result.catalog.products), 6)
+            self.assertIsNone(result.stale_reason)
+
+    def test_successful_download_is_not_stale(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cache = Path(tmp_dir) / "tiptoi.csv"
+            with patch.object(catalog, "download_catalog", return_value=parse_catalog(FIXTURE_CSV)):
+                result = catalog.load_catalog(cache=cache, force=True)
+            self.assertIsNone(result.stale_reason)
+
+
+class FileNameTests(unittest.TestCase):
+    def test_safe_names(self) -> None:
+        for name in ("WN", "Die Eiskoenigin", "a.b", "..."):
+            with self.subTest(name=name):
+                self.assertTrue(is_safe_file_name(name))
+
+    def test_unsafe_names(self) -> None:
+        for name in ("", ".", "..", "a/b", "../x", "a\\b", "a\0b"):
+            with self.subTest(name=name):
+                self.assertFalse(is_safe_file_name(name))
+
+    def test_gme_file_name(self) -> None:
+        product = Product(version="1", url="https://x/WN.gme", name="WN")
+        self.assertEqual(gme_file_name(product), "WN.gme")
+
+    def test_gme_file_name_rejects_unsafe_name(self) -> None:
+        product = Product(version="1", url="https://x/y.gme", name="../evil")
+        with self.assertRaises(CatalogError):
+            gme_file_name(product)
 
 
 if __name__ == "__main__":

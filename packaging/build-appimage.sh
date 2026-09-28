@@ -184,7 +184,7 @@ trim_appdir() {
         done
     fi
 
-    # WHY: enforces the recorded decision to bundle the xcb platform plugin only (PLANS.md) -
+    # WHY: only the xcb platform plugin is bundled (XWayland covers Wayland sessions) -
     # otherwise Qt on a Wayland session auto-picks the bundled libqwayland.so, whose
     # shell-integration plugins are removed by the KEEP_PLUGIN_DIRS filter above, and it aborts.
     while IFS= read -r -d '' f; do

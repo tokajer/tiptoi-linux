@@ -60,7 +60,7 @@ print(\"QT_VERSION_OK:\" + qt_version)
 SSL_CERT_FILE="$CERTS" "$PYBIN" -c "
 from tiptoi_linux.catalog import load_catalog
 
-c = load_catalog(force=True)
+c = load_catalog(force=True).catalog
 assert len(c.products) > 250, f\"expected >250 products, got {len(c.products)}\"
 print(\"PRODUCT_COUNT_OK:\" + str(len(c.products)))
 "

@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=77.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tiptoi-linux"
+version = "0.1.0"
+requires-python = ">=3.11"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
+dependencies = []
+
+[project.optional-dependencies]
+gui = ["PySide6>=6.5"]
+
+[project.scripts]
+tiptoi = "tiptoi_linux.cli:main"
+tiptoi-gui = "tiptoi_linux.gui:main"
+
+[tool.setuptools.packages.find]
+include = ["tiptoi_linux*"]
+exclude = ["tests*"]
+
+[tool.setuptools.package-data]
+tiptoi_linux = ["locale/*/LC_MESSAGES/*.mo", "resources/*.png"]

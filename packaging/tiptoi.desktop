@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=tiptoi
+GenericName=tiptoi Pen Manager
+GenericName[de]=tiptoi-Stift-Verwaltung
+Comment=Download tiptoi titles and copy them to the pen
+Comment[de]=tiptoi-Titel herunterladen und auf den Stift kopieren
+Exec=AppRun %U
+Icon=tiptoi
+Categories=Utility;
+Terminal=false

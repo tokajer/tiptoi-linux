@@ -1,0 +1,90 @@
+#! /bin/bash
+if [ -z "${APPIMAGE}" ]; then
+    # WHY: AppRun here is a regular file at the AppDir root, not a symlink to usr/bin/python3.12
+    # three levels deep as in the base image this was copied from - exactly one %/* strip is correct.
+    self=$(readlink -f -- "$0")
+    export APPDIR="${self%/*}"
+fi
+export SSL_CERT_FILE="${APPDIR}/opt/_internal/certs.pem"
+
+# WHY: libQt6Gui.so.6 itself has direct DT_NEEDED entries on these - they fail at
+# `import PySide6.QtWidgets`, before any platform plugin is even consulted, so they must be checked
+# unconditionally (including under QT_QPA_PLATFORM=offscreen, unlike the xcb-only libs below).
+IMPORT_LIBS=(
+    libGL.so.1 libEGL.so.1 libX11.so.6 libxkbcommon.so.0 libglib-2.0.so.0
+    libfontconfig.so.1 libfreetype.so.6 libdbus-1.so.3
+)
+XCB_LIBS=(
+    libxcb.so.1 libxcb-cursor.so.0 libxcb-icccm.so.4 libxcb-image.so.0 libxcb-keysyms.so.1
+    libxcb-randr.so.0 libxcb-render.so.0 libxcb-render-util.so.0 libxcb-shape.so.0
+    libxcb-shm.so.0 libxcb-sync.so.1 libxcb-util.so.1 libxcb-xfixes.so.0 libxcb-xkb.so.1
+    libX11-xcb.so.1 libxkbcommon-x11.so.0
+)
+
+platform="${QT_QPA_PLATFORM:-}"
+needed_libs=("${IMPORT_LIBS[@]}")
+case "$platform" in
+    offscreen|minimal|offscreen:*|minimal:*)
+        ;;
+    *)
+        needed_libs+=("${XCB_LIBS[@]}")
+        ;;
+esac
+
+# WHY: `command -v ldconfig` fails for non-root users on Debian/Ubuntu, where ldconfig lives in
+# /sbin and /sbin is normally absent from a non-root PATH; try the absolute path first.
+ldconfig_output=""
+ldconfig_ran=""
+if [ -x /sbin/ldconfig ]; then
+    if ldconfig_output=$(/sbin/ldconfig -p 2>/dev/null); then
+        ldconfig_ran="1"
+    fi
+elif command -v ldconfig >/dev/null 2>&1; then
+    if ldconfig_output=$(ldconfig -p 2>/dev/null); then
+        ldconfig_ran="1"
+    fi
+fi
+
+missing_libs=()
+for lib in "${needed_libs[@]}"; do
+    lib_found=""
+    if [ -n "$ldconfig_ran" ]; then
+        if grep -q "$lib" <<<"$ldconfig_output"; then
+            lib_found="1"
+        fi
+    else
+        for dir in /usr/lib/x86_64-linux-gnu /usr/lib64 /usr/lib /lib/x86_64-linux-gnu /lib64; do
+            if [ -e "${dir}/${lib}" ]; then
+                lib_found="1"
+                break
+            fi
+        done
+    fi
+    if [ -z "$lib_found" ]; then
+        missing_libs+=("$lib")
+    fi
+done
+
+if [ "${#missing_libs[@]}" -gt 0 ]; then
+    if [ -n "$ldconfig_ran" ]; then
+        echo "tiptoi: missing required system libraries: ${missing_libs[*]}" >&2
+        echo "Install them and retry:" >&2
+        echo "  Debian/Ubuntu: sudo apt install libgl1 libegl1 libx11-6 libxkbcommon0 libglib2.0-0 libfontconfig1 libfreetype6 libdbus-1-3 libxcb1 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render0 libxcb-render-util0 libxcb-shape0 libxcb-shm0 libxcb-sync1 libxcb-util1 libxcb-xfixes0 libxcb-xkb1 libx11-xcb1 libxkbcommon-x11-0" >&2
+        echo "  Fedora:        sudo dnf install mesa-libGL mesa-libEGL libX11 libxkbcommon glib2 fontconfig freetype libX11-xcb xcb-util-cursor xcb-util-image xcb-util-keysyms xcb-util-renderutil xcb-util-wm xcb-util xkbcommon-x11 dbus-libs" >&2
+        exit 1
+    else
+        # WHY: an error path that fires on a working system (NixOS/Guix, other non-FHS layouts,
+        # anywhere ldconfig is simply absent) would be worse than the Qt error message it replaces.
+        echo "tiptoi: warning: could not verify system libraries (no ldconfig found); continuing anyway. If the app fails to start, these may be missing: ${missing_libs[*]}" >&2
+    fi
+fi
+
+# WHY: enforces the recorded decision (PLANS.md) to bundle the xcb platform plugin only - without
+# this, Qt on a Wayland session auto-picks the bundled libqwayland.so, whose shell-integration
+# plugins the trim step deletes, and it aborts instead of falling back to XWayland.
+export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-xcb}"
+# WHY: standard AppImage hygiene - a host PYTHONPATH from conda/poetry can shadow the bundled
+# certifi/PySide6 with host-glibc builds.
+unset PYTHONPATH PYTHONHOME PYTHONSTARTUP
+
+exec "$APPDIR/opt/python3.12/bin/python3.12" -m tiptoi_linux.gui "$@"

@@ -1,0 +1,123 @@
+# Manually triggered release: Actions tab -> "Release" -> "Run workflow".
+# The version comes from pyproject.toml; bump it there (and in tiptoi_linux/__init__.py) first.
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      prerelease:
+        description: "Mark the release as a pre-release"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # 3.11 is the floor declared in pyproject.toml; testing there catches 3.12+ APIs.
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+
+      # libQt6Gui needs these at import time even with the offscreen platform (see PLANS.md).
+      - name: Install Qt runtime libraries and gettext
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 libgl1 libxkbcommon0 libfontconfig1 libdbus-1-3 gettext
+
+      - name: Install PySide6 (same version the AppImage bundles)
+        run: |
+          version="$(sed -n 's/^readonly PYSIDE6_VERSION="\(.*\)"$/\1/p' packaging/build-appimage.sh)"
+          python -m pip install --quiet "PySide6-Essentials==${version}"
+
+      - name: Check the compiled translations match their sources
+        run: |
+          for po in tiptoi_linux/locale/*/LC_MESSAGES/*.po; do
+            [ -e "$po" ] || continue
+            mo="${po%.po}.mo"
+            msgfmt --check -o "$RUNNER_TEMP/fresh.mo" "$po"
+            python - "$mo" "$RUNNER_TEMP/fresh.mo" <<'EOF'
+          import gettext, sys
+          def load(path):
+              with open(path, "rb") as f:
+                  return gettext.GNUTranslations(f)._catalog
+          if load(sys.argv[1]) != load(sys.argv[2]):
+              sys.exit(f"{sys.argv[1]} is stale: recompile it with msgfmt")
+          EOF
+          done
+
+      - name: Run tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+          LANGUAGE: C
+        run: python -m unittest discover -s tests -t .
+
+  release:
+    needs: test
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Read version and refuse an existing tag
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          package_version="$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' tiptoi_linux/__init__.py)"
+          if [ "$version" != "$package_version" ]; then
+            echo "::error::pyproject.toml says $version but tiptoi_linux/__init__.py says $package_version"
+            exit 1
+          fi
+          if gh release view "v${version}" >/dev/null 2>&1; then
+            echo "::error::release v${version} already exists; bump the version in pyproject.toml first"
+            exit 1
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      # The build script rasterises the SVG icon with magick, convert or inkscape.
+      - name: Install build tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends inkscape
+
+      # Only checksum-pinned downloads live here; the build script re-verifies every cache hit.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: packaging/build/cache
+          key: appimage-cache-${{ hashFiles('packaging/build-appimage.sh') }}
+
+      - name: Build the AppImage
+        run: bash packaging/build-appimage.sh
+
+      - name: Smoke-test on Ubuntu 22.04 and Debian 12
+        run: bash packaging/smoke-test.sh
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          asset="tiptoi-${VERSION}-x86_64.AppImage"
+          mv tiptoi-x86_64.AppImage "$asset"
+          sha256sum "$asset" > SHA256SUMS
+          flags=()
+          if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); fi
+          gh release create "v${VERSION}" "$asset" SHA256SUMS \
+            --target "$GITHUB_SHA" \
+            --title "tiptoi-linux ${VERSION}" \
+            --generate-notes \
+            "${flags[@]}"

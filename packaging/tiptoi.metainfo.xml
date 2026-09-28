@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.tiptoi_linux.tiptoi</id>
+  <name>tiptoi</name>
+  <summary>Download tiptoi titles and copy them to the pen</summary>
+  <summary xml:lang="de">tiptoi-Titel herunterladen und auf den Stift kopieren</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <description>
+    <p>
+      tiptoi is an unofficial, third-party manager for the Ravensburger tiptoi audio pen. It
+      browses the live product catalog, downloads titles, copies them onto the pen with an
+      on-device verification, shows which installed titles are outdated, deletes titles, and
+      mounts and unmounts the pen safely.
+    </p>
+  </description>
+  <launchable type="desktop-id">tiptoi.desktop</launchable>
+  <provides>
+    <id>tiptoi.desktop</id>
+  </provides>
+  <content_rating type="oars-1.1"/>
+  <developer id="io.github.tiptoi_linux">
+    <name>tiptoi-linux contributors</name>
+  </developer>
+  <releases>
+    <release version="0.1.0" date="2026-09-27"/>
+  </releases>
+</component>

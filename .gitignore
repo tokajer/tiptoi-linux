@@ -1,0 +1,10 @@
+__pycache__/
+*.egg-info/
+/build/
+/packaging/build/
+*.AppImage
+/graphify-out/
+/.claude/settings.local.json
+*.md
+!README.md
+.claude
